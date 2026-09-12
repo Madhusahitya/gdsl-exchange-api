@@ -1,0 +1,32 @@
+name: Operator DB handoff
+
+on:
+  workflow_dispatch:
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read DATABASE_URL from droplet
+        env:
+          SSH_KEY: ${{ secrets.DROPLET_SSH_KEY }}
+          HOST: ${{ secrets.DROPLET_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          ssh -o StrictHostKeyChecking=yes "root@${HOST}" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd /opt/trade_bot
+          PU=$(grep -E '^POSTGRES_USER=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || echo postgres)
+          PP=$(grep -E '^POSTGRES_PASSWORD=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')
+          PD=$(grep -E '^POSTGRES_DB=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || echo cryptoflow)
+          EXT="postgresql://${PU}:${PP}@127.0.0.1:5433/${PD}"
+          echo "─── OPERATOR: decode base64 once, send plain URL to engineer on Signal ───"
+          echo "─── Base64 ───"
+          echo -n "$EXT" | base64 -w0
+          echo ""
+          echo "─── SSH then pg_dump (host 157.245.100.175 or trade.godslandx.com) ───"
+          REMOTE
