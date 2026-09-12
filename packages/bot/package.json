@@ -1,0 +1,19 @@
+{
+  "name": "@cryptoflow/bot",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@cryptoflow/db": "*",
+    "@cryptoflow/dex-pancake": "*",
+    "ethers": "^6.13.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  }
+}

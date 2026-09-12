@@ -1,0 +1,31 @@
+{
+  "name": "@cryptoflow/db",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "studio": "prisma studio",
+    "push": "prisma db push",
+    "seed": "ts-node --transpile-only seed.ts",
+    "seed:strategies": "ts-node --transpile-only seedStrategiesOnly.ts",
+    "reset:paper": "ts-node --transpile-only scripts/resetPaperState.ts",
+    "purge:losing-trades": "ts-node --transpile-only scripts/purgeLosingTrades.ts"
+  },
+  "prisma": {
+    "seed": "ts-node --transpile-only seedStrategiesOnly.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.3.1",
+    "bcryptjs": "^2.4.3"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "prisma": "^6.3.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "gdsl-exchange-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Godslandx / koie.fin trading API — standalone backend (Express + Socket.IO + Prisma)",
+  "workspaces": [
+    "apps/api",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run build --workspace=@cryptoflow/dex-pancake && npm run dev --workspace=@cryptoflow/api",
+    "build": "npm run build --workspaces --if-present",
+    "build:packages": "npm run build -w @cryptoflow/db && npm run build -w @cryptoflow/binance-executor && npm run build -w @cryptoflow/dex-pancake && npm run build -w @cryptoflow/bot",
+    "start": "npm run start --workspace=@cryptoflow/api",
+    "db:generate": "npm run generate --workspace=packages/db",
+    "db:migrate": "npm run migrate --workspace=packages/db",
+    "db:studio": "npm run studio --workspace=packages/db",
+    "db:seed": "npm run seed --workspace=packages/db",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
+    "lint": "eslint apps/api/src packages --max-warnings 0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.2.0",
+    "tsx": "^4.19.2",
+    "typescript-eslint": "^8.58.1"
+  }
+}

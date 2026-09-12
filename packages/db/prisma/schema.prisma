@@ -1,0 +1,1047 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  /** Optional human-readable handle (lowercased, alphanumeric + `_-.` ). Lets internal users sign in without exposing email. */
+  username     String?      @unique
+  passwordHash String
+  /** True once the user has confirmed ownership of `email` via the OTP flow. */
+  emailVerified Boolean     @default(false)
+  /** bcrypt hash of the latest 6-digit OTP. Cleared once verified. */
+  emailVerificationCodeHash String?
+  /** When the latest OTP expires (15 min after issue). Cleared once verified. */
+  emailVerificationExpiresAt DateTime?
+  /** Number of wrong OTP submissions for the current code. Resets when a new code is issued. */
+  emailVerificationAttempts Int @default(0)
+  /** Last time we sent a verification email — used to enforce a 60 s resend cooldown. */
+  emailVerificationLastSentAt DateTime?
+  failedLoginAttempts Int   @default(0)
+  lockoutUntil DateTime?
+  balance      Decimal      @default(0) @db.Decimal(18, 8)
+  /** Reserved for future promo/loyalty credits. Real-funds-only platform → defaults to 0. */
+  trialBalance Decimal      @default(0) @db.Decimal(18, 8)
+  referralCode String?      @unique
+  referredById String?
+  createdAt    DateTime     @default(now())
+
+  portfolio    Portfolio?
+  trades       Trade[]
+  botSessions  BotSession[]
+  withdrawals  Withdrawal[]
+  deposits     Deposit[]
+  referralRewards ReferralReward[]
+  exchangeConnections ExchangeConnection[]
+  walletSnapshots WalletBalanceSnapshot[]
+  orders       Order[]
+  strategyPositions StrategyPosition[]
+  riskRules    RiskRule[]
+  riskEvents   RiskEvent[]
+  botRuns      BotRun[]
+  executionEvents ExecutionEvent[]
+  tradingLogs  TradingLog[]
+  hotWalletDelegatedSpends HotWalletDelegatedSpend[]
+  telegramLinks TelegramLink[]
+  telegramLinkCodes TelegramLinkCode[]
+  personalWallet PersonalWallet?
+  solanaPersonalWallet SolanaPersonalWallet?
+  personalWalletWithdrawals PersonalWalletWithdrawal[]
+  solanaPersonalWalletWithdrawals SolanaPersonalWalletWithdrawal[]
+  crossChainTransfers CrossChainTransfer[]
+  walletConverts WalletConvert[]
+  inboxMessages  InboxMessage[]
+  authSessions   AuthSession[]
+  jupiterSuperMachine JupiterSuperMachineConfig?
+  jupiterExitConfig JupiterExitConfig?
+  cexSuperMachine CexSuperMachineConfig?
+  cexExitConfig CexExitConfig?
+  fiatRampOrders FiatRampOrder[]
+  referredBy   User?        @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals    User[]       @relation("UserReferrals")
+}
+
+model AuthSession {
+  id              String   @id @default(cuid())
+  userId          String
+  /** sha256 hash of refresh JWT to avoid storing raw token material. */
+  refreshTokenHash String  @unique
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  replacedById    String?
+  userAgent       String?
+  ipAddress       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+
+/** Persisted trading / allocation notes for review (popups also land here). */
+enum InboxCategory {
+  TOKEN_TRADING_SIGNAL
+  BALANCE_ALLOCATION
+  SYSTEM
+}
+
+model InboxMessage {
+  id         String       @id @default(cuid())
+  userId     String
+  category   InboxCategory
+  title      String       @db.VarChar(220)
+  body       String       @db.Text
+  metadata   Json?
+  /** Optional idempotency key (e.g. per-hour signal bucket). */
+  dedupeKey  String?      @db.VarChar(180)
+  readAt     DateTime?
+  createdAt  DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, readAt])
+  @@index([userId, dedupeKey])
+}
+
+/**
+ * Per-user, server-managed BSC EVM wallet ("Personal Wallet").
+ *
+ * The user funds this address once from any external wallet (MetaMask,
+ * Coinbase, Binance) and the bot signs trades on their behalf — no further
+ * MetaMask prompts. The private key is encrypted with AES-256-GCM using
+ * `WALLET_ENCRYPTION_KEY` and never leaves the server.
+ */
+model PersonalWallet {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  /** Public 0x address derived from the encrypted private key. */
+  address             String   @unique
+  /** AES-256-GCM ciphertext of the private key (base64-encoded iv|tag|ciphertext). */
+  encryptedPrivateKey String
+  /** Chain id; default BSC mainnet (56). */
+  chainId             Int      @default(56)
+  /** When false, withdrawals + bot signing are disabled (account lock). */
+  enabled             Boolean  @default(true)
+  /** Cached USD valuation from the most recent balance read. */
+  lastUsdValue        Decimal  @default(0) @db.Decimal(18, 8)
+  /** UTC calendar date for `dayAnchorTotalUsd` (first wallet sync of that day sets the baseline). */
+  dayAnchorUtcDate    DateTime? @db.Date
+  /** Total USD at `dayAnchorUtcDate` — used for dashboard “today” wallet move vs ledger PnL. */
+  dayAnchorTotalUsd   Decimal?  @db.Decimal(18, 8)
+  /** Last time the balances were refreshed by the API. */
+  lastSyncedAt        DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  withdrawals         PersonalWalletWithdrawal[]
+
+  @@index([address])
+}
+
+/**
+ * Server-managed Solana wallet for Jupiter swaps (separate from BSC PersonalWallet).
+ * Private key encrypted with WALLET_ENCRYPTION_KEY; used only for signing Jupiter txs.
+ */
+model SolanaPersonalWallet {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  /** Base58 Solana public address. */
+  address             String   @unique
+  /** AES-256-GCM ciphertext of the 64-byte secret key (base64-encoded before encrypt). */
+  encryptedPrivateKey String
+  enabled             Boolean  @default(true)
+  lastUsdValue        Decimal  @default(0) @db.Decimal(18, 8)
+  lastSyncedAt        DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  withdrawals         SolanaPersonalWalletWithdrawal[]
+
+  @@index([address])
+}
+
+model SolanaPersonalWalletWithdrawal {
+  id            String                         @id @default(cuid())
+  walletId      String
+  userId        String
+  /** Destination Solana base58 address. */
+  toAddress     String
+  /** Asset symbol — USDC or SOL. */
+  asset         String
+  /** Amount in token units (not lamports). */
+  amount        Decimal                        @db.Decimal(28, 12)
+  /** Transaction signature once broadcast. */
+  txSignature   String?                        @unique
+  status        PersonalWalletWithdrawalStatus @default(PENDING)
+  feeUsd        Decimal                        @default(0) @db.Decimal(18, 8)
+  errorMessage  String?
+  requestedAt   DateTime                       @default(now())
+  processedAt   DateTime?
+
+  wallet        SolanaPersonalWallet           @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  user          User                           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, requestedAt(sort: Desc)])
+  @@index([userId, status, requestedAt(sort: Desc)])
+}
+
+model PersonalWalletWithdrawal {
+  id            String                         @id @default(cuid())
+  walletId      String
+  userId        String
+  /** Destination address (any external wallet). */
+  toAddress     String
+  /** Asset symbol — BNB, USDT, USDC, BTCB, ETH, XRP, DOGE, ... */
+  asset         String
+  /** Amount in token units (not wei). */
+  amount        Decimal                        @db.Decimal(28, 12)
+  /** On-chain transaction hash once broadcast. */
+  txHash        String?                        @unique
+  status        PersonalWalletWithdrawalStatus @default(PENDING)
+  /** Network fee in USD (best-effort). */
+  feeUsd        Decimal                        @default(0) @db.Decimal(18, 8)
+  errorMessage  String?
+  requestedAt   DateTime                       @default(now())
+  processedAt   DateTime?
+
+  wallet        PersonalWallet                 @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  user          User                           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, requestedAt(sort: Desc)])
+  @@index([userId, status, requestedAt(sort: Desc)])
+}
+
+/**
+ * Cross-chain USDC transfer between a user's BSC and Solana personal wallets,
+ * settled with operator liquidity pools (see crossChainTransferService.ts).
+ */
+model CrossChainTransfer {
+  id           String                    @id @default(cuid())
+  userId       String
+  /** BSC_TO_SOL or SOL_TO_BSC. */
+  direction    String
+  asset        String                    @default("USDC")
+  /** Destination coin when it differs from `asset` (cross-token swap+bridge); null = same token. */
+  destAsset    String?
+  /** Amount debited from the source wallet (token units). */
+  amount       Decimal                   @db.Decimal(28, 12)
+  /** Flat fee withheld (USD). */
+  feeUsd       Decimal                   @default(0) @db.Decimal(18, 8)
+  /** Amount credited to the destination wallet (amount - fee). */
+  creditAmount Decimal                   @db.Decimal(28, 12)
+  status       CrossChainTransferStatus  @default(PENDING)
+  /** Tx hash/sig for the debit (source -> operator pool) leg. */
+  debitTxRef   String?
+  /** Tx hash/sig for the credit (operator pool -> destination) leg. */
+  creditTxRef  String?
+  errorMessage String?
+  requestedAt  DateTime                  @default(now())
+  processedAt  DateTime?
+
+  user         User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, requestedAt(sort: Desc)])
+  @@index([status, requestedAt(sort: Desc)])
+}
+
+enum CrossChainTransferStatus {
+  PENDING
+  DEBITED
+  COMPLETED
+  CREDIT_PENDING
+  FAILED
+}
+
+/** Same-chain convert (BSC Pancake or Solana Jupiter) — for wallet history. */
+model WalletConvert {
+  id          String   @id @default(cuid())
+  userId      String
+  /** BSC or SOLANA */
+  chain       String
+  fromSymbol  String
+  toSymbol    String
+  inAmount    Decimal  @db.Decimal(28, 12)
+  outAmount   Decimal  @db.Decimal(28, 12)
+  txRef       String
+  requestedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, requestedAt(sort: Desc)])
+  @@index([userId, chain, requestedAt(sort: Desc)])
+}
+
+enum PersonalWalletWithdrawalStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Portfolio {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  totalValue Decimal  @default(0) @db.Decimal(18, 8)
+  pnl        Decimal  @default(0) @db.Decimal(18, 8)
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt(sort: Desc)])
+}
+
+model Strategy {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  description String
+  riskLevel   RiskLevel
+
+  trades      Trade[]
+  botSessions BotSession[]
+  strategyPositions StrategyPosition[]
+  botRuns     BotRun[]
+}
+
+model Trade {
+  id         String      @id @default(cuid())
+  userId     String
+  strategyId String
+  pair       String
+  entryPrice Decimal     @db.Decimal(18, 8)
+  exitPrice  Decimal?    @db.Decimal(18, 8)
+  pnl        Decimal?    @db.Decimal(18, 8)
+  /** USDT notional allocated for this paper lot (AI engine) */
+  allocationUsd Decimal? @db.Decimal(18, 8)
+  /** Per-position take-profit % override (null = user's global exit settings). */
+  takeProfitPct Decimal? @db.Decimal(8, 4)
+  /** Per-position stop-loss % override (null = user's global exit settings). */
+  stopLossPct Decimal? @db.Decimal(8, 4)
+  /** Per-position trailing-stop override (null = inherit global setting). */
+  trailingStop Boolean?
+  /** Highest Jupiter sell mark seen since entry — persisted so trailing survives restarts. */
+  trailingPeak Decimal? @db.Decimal(18, 8)
+  status     TradeStatus @default(OPEN)
+  createdAt  DateTime    @default(now())
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy   Strategy    @relation(fields: [strategyId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, status])
+  @@index([userId, strategyId])
+  @@index([pair])
+}
+
+model BotSession {
+  id         String    @id @default(cuid())
+  userId     String
+  strategyId String
+  startedAt  DateTime  @default(now())
+  stoppedAt  DateTime?
+  isActive   Boolean   @default(true)
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy   Strategy  @relation(fields: [strategyId], references: [id])
+
+  @@index([userId, isActive])
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TradeStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+model Withdrawal {
+  id            String           @id @default(cuid())
+  userId        String
+  amount        Decimal          @db.Decimal(18, 8)
+  walletAddress String
+  network       String
+  fee           Decimal          @db.Decimal(18, 8)
+  status        WithdrawalStatus @default(PENDING)
+  createdAt     DateTime         @default(now())
+
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum WithdrawalStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Deposit {
+  id        String        @id @default(cuid())
+  userId    String
+  amount    Decimal       @db.Decimal(18, 8)
+  status    DepositStatus @default(COMPLETED)
+  reference String?
+  createdAt DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+enum DepositStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model ReferralReward {
+  id        String   @id @default(cuid())
+  userId    String
+  amount    Decimal  @db.Decimal(18, 8)
+  reason    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model ExchangeConnection {
+  id                String           @id @default(cuid())
+  userId            String
+  exchange          ExchangeName
+  label             String?
+  encryptedApiKey   String
+  encryptedSecret   String
+  encryptedPassphrase String?
+  canTrade          Boolean          @default(true)
+  canRead           Boolean          @default(true)
+  canWithdraw       Boolean          @default(false)
+  isActive          Boolean          @default(true)
+  lastCheckedAt     DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  walletSnapshots   WalletBalanceSnapshot[]
+  orders            Order[]
+
+  @@unique([userId, exchange])
+  @@index([userId, isActive])
+}
+
+model WalletBalanceSnapshot {
+  id                   String             @id @default(cuid())
+  userId               String
+  exchangeConnectionId String
+  source               WalletSource       @default(EXCHANGE)
+  capturedAt           DateTime           @default(now())
+  totalUsdValue        Decimal            @default(0) @db.Decimal(18, 8)
+
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exchangeConnection   ExchangeConnection @relation(fields: [exchangeConnectionId], references: [id], onDelete: Cascade)
+  assetBalances        WalletAssetBalance[]
+
+  @@index([userId, capturedAt(sort: Desc)])
+  @@index([exchangeConnectionId, capturedAt(sort: Desc)])
+}
+
+model WalletAssetBalance {
+  id               String                @id @default(cuid())
+  snapshotId       String
+  asset            String
+  free             Decimal               @default(0) @db.Decimal(28, 12)
+  locked           Decimal               @default(0) @db.Decimal(28, 12)
+  total            Decimal               @default(0) @db.Decimal(28, 12)
+  usdValue         Decimal               @default(0) @db.Decimal(18, 8)
+
+  snapshot         WalletBalanceSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, asset])
+  @@index([asset])
+}
+
+model Order {
+  id                   String             @id @default(cuid())
+  userId               String
+  exchangeConnectionId String
+  clientOrderId        String
+  exchangeOrderId      String?
+  symbol               String
+  side                 OrderSide
+  type                 OrderType
+  timeInForce          TimeInForce?
+  quantity             Decimal            @db.Decimal(28, 12)
+  price                Decimal?           @db.Decimal(28, 12)
+  stopPrice            Decimal?           @db.Decimal(28, 12)
+  takeProfitPrice      Decimal?           @db.Decimal(28, 12)
+  trailingPercent      Decimal?           @db.Decimal(8, 4)
+  status               OrderStatus        @default(PENDING_SUBMIT)
+  rejectReason         String?
+  avgFillPrice         Decimal?           @db.Decimal(28, 12)
+  filledQuantity       Decimal            @default(0) @db.Decimal(28, 12)
+  quoteQuantity        Decimal            @default(0) @db.Decimal(28, 12)
+  submittedAt          DateTime?
+  closedAt             DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exchangeConnection   ExchangeConnection @relation(fields: [exchangeConnectionId], references: [id], onDelete: Cascade)
+  executions           ExecutionEvent[]
+
+  @@unique([userId, clientOrderId])
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@index([exchangeConnectionId, createdAt(sort: Desc)])
+  @@index([symbol, status])
+}
+
+model StrategyPosition {
+  id            String   @id @default(cuid())
+  userId        String
+  strategyId    String?
+  symbol        String
+  quantity      Decimal  @default(0) @db.Decimal(28, 12)
+  avgEntryPrice Decimal? @db.Decimal(28, 12)
+  unrealizedPnl Decimal  @default(0) @db.Decimal(18, 8)
+  realizedPnl   Decimal  @default(0) @db.Decimal(18, 8)
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy      Strategy? @relation(fields: [strategyId], references: [id])
+
+  @@unique([userId, strategyId, symbol])
+  @@index([userId, updatedAt(sort: Desc)])
+}
+
+model PositionLot {
+  id            String   @id @default(cuid())
+  userId        String
+  symbol        String
+  quantity      Decimal  @db.Decimal(28, 12)
+  entryPrice    Decimal  @db.Decimal(28, 12)
+  openedAt      DateTime @default(now())
+  closedAt      DateTime?
+
+  @@index([userId, symbol, openedAt(sort: Desc)])
+}
+
+model RiskRule {
+  id               String       @id @default(cuid())
+  userId           String
+  maxOrderNotional Decimal?     @db.Decimal(18, 8)
+  maxOpenNotional  Decimal?     @db.Decimal(18, 8)
+  maxDailyLoss     Decimal?     @db.Decimal(18, 8)
+  cooldownMinutes  Int?         @default(0)
+  maxLosingStreak  Int?         @default(0)
+  isEnabled        Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isEnabled])
+}
+
+model RiskEvent {
+  id          String         @id @default(cuid())
+  userId      String
+  kind        RiskEventKind
+  severity    RiskSeverity   @default(WARN)
+  message     String
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model BotRun {
+  id                 String      @id @default(cuid())
+  userId             String
+  strategyId         String?
+  startedAt          DateTime    @default(now())
+  stoppedAt          DateTime?
+  status             BotRunStatus @default(RUNNING)
+  stopReason         String?
+
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy           Strategy?   @relation(fields: [strategyId], references: [id])
+  executionEvents    ExecutionEvent[]
+
+  @@index([userId, startedAt(sort: Desc)])
+  @@index([status])
+}
+
+model ExecutionEvent {
+  id          String             @id @default(cuid())
+  userId      String
+  orderId     String?
+  botRunId    String?
+  eventType   ExecutionEventType
+  payload     Json?
+  createdAt   DateTime           @default(now())
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order       Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  botRun      BotRun?            @relation(fields: [botRunId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([orderId, createdAt(sort: Desc)])
+}
+
+enum ExchangeName {
+  BINANCE
+}
+
+enum WalletSource {
+  EXCHANGE
+  MANUAL
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderType {
+  MARKET
+  LIMIT
+  STOP_MARKET
+  TAKE_PROFIT_MARKET
+  TRAILING_STOP_MARKET
+}
+
+enum TimeInForce {
+  GTC
+  IOC
+  FOK
+}
+
+enum OrderStatus {
+  PENDING_SUBMIT
+  NEW
+  PARTIALLY_FILLED
+  FILLED
+  CANCELED
+  REJECTED
+  EXPIRED
+}
+
+enum RiskEventKind {
+  ORDER_REJECTED
+  DAILY_LOSS_LIMIT
+  OPEN_EXPOSURE_LIMIT
+  LOSING_STREAK_COOLDOWN
+  CIRCUIT_BREAKER
+}
+
+enum RiskSeverity {
+  INFO
+  WARN
+  CRITICAL
+}
+
+enum BotRunStatus {
+  RUNNING
+  STOPPED
+  FAILED
+}
+
+enum ExecutionEventType {
+  ORDER_SUBMITTED
+  ORDER_UPDATED
+  ORDER_FILLED
+  ORDER_CANCELED
+  ORDER_REJECTED
+  BOT_STARTED
+  BOT_STOPPED
+  RISK_TRIGGERED
+  SIGNAL_GENERATED
+  RL_PREDICTION
+  BAYES_DECISION
+}
+
+// ─── Market Data ────────────────────────────────────────────────────
+
+model Kline {
+  id          String   @id @default(cuid())
+  symbol      String
+  interval    String
+  openTime    DateTime
+  open        Decimal  @db.Decimal(28, 12)
+  high        Decimal  @db.Decimal(28, 12)
+  low         Decimal  @db.Decimal(28, 12)
+  close       Decimal  @db.Decimal(28, 12)
+  volume      Decimal  @db.Decimal(28, 12)
+  quoteVolume Decimal  @db.Decimal(28, 12)
+  trades      Int
+
+  @@unique([symbol, interval, openTime])
+  @@index([symbol, interval, openTime(sort: Desc)])
+}
+
+model Feature {
+  id       String   @id @default(cuid())
+  symbol   String
+  interval String
+  ts       DateTime
+  payload  Json
+
+  @@unique([symbol, interval, ts])
+  @@index([symbol, ts(sort: Desc)])
+}
+
+// ─── Signal & Bayesian ──────────────────────────────────────────────
+
+model Signal {
+  id         String   @id @default(cuid())
+  userId     String?
+  source     String
+  symbol     String
+  ts         DateTime
+  direction  String
+  confidence Decimal  @db.Decimal(6, 5)
+  rationale  Json?
+  outcome    String?
+  returnPct  Decimal? @db.Decimal(10, 6)
+
+  @@index([source, symbol, ts(sort: Desc)])
+  @@index([symbol, ts(sort: Desc)])
+}
+
+model BayesPrior {
+  id           String   @id @default(cuid())
+  signalSource String
+  symbol       String
+  interval     String
+  alphaUp      Float    @default(1)
+  betaUp       Float    @default(1)
+  alphaDown    Float    @default(1)
+  betaDown     Float    @default(1)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([signalSource, symbol, interval])
+}
+
+// ─── News / Sentiment ───────────────────────────────────────────────
+
+model NewsEvent {
+  id               String   @id @default(cuid())
+  source           String
+  externalId       String
+  title            String
+  url              String?
+  publishedAt      DateTime
+  symbolsMentioned String[]
+  sentimentScore   Decimal  @db.Decimal(6, 5)
+  rawPayload       Json?
+
+  @@unique([source, externalId])
+  @@index([publishedAt(sort: Desc)])
+}
+
+// ─── Reinforcement Learning ─────────────────────────────────────────
+
+model ModelPrediction {
+  id         String   @id @default(cuid())
+  modelId    String
+  version    String
+  symbol     String
+  ts         DateTime
+  action     String
+  qValues    Json?
+  confidence Decimal  @db.Decimal(6, 5)
+  stateHash  String?
+  shadow     Boolean  @default(true)
+
+  @@index([modelId, symbol, ts(sort: Desc)])
+}
+
+model RLEpisode {
+  id          String    @id @default(cuid())
+  modelId     String
+  symbol      String
+  startedAt   DateTime
+  endedAt     DateTime?
+  totalReward Decimal   @default(0) @db.Decimal(18, 8)
+  stepCount   Int       @default(0)
+  metadata    Json?
+
+  steps       RLStep[]
+
+  @@index([modelId, startedAt(sort: Desc)])
+}
+
+model RLStep {
+  id        String    @id @default(cuid())
+  episodeId String
+  t         Int
+  state     Json
+  action    Int
+  reward    Decimal   @db.Decimal(18, 8)
+  nextState Json?
+  done      Boolean   @default(false)
+
+  episode   RLEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([episodeId, t])
+}
+
+// ─── Model version registry ──────────────────────────────────────────
+
+/// Engine logs: AI signals, executions, risk events, webhooks
+model TradingLog {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String
+  message   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+/// Server-signed Pancake V2 swaps (delegated hot wallet) — ledger for USDT spend caps
+model HotWalletDelegatedSpend {
+  id            String   @id @default(cuid())
+  userId        String
+  direction     String
+  usdtNotional  Decimal  @db.Decimal(18, 8)
+  wbnbAmount    Decimal? @db.Decimal(18, 18)
+  txHash        String
+  approveTxHash String?
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model ModelVersion {
+  id           String    @id @default(cuid())
+  modelId      String                        // "dqn-v1", "dqn-v2", etc.
+  status       String                        // "champion" | "candidate" | "archived" | "rejected"
+  sharpe       Float?
+  sortino      Float?
+  winRate      Float?
+  maxDrawdown  Float?
+  profitFactor Float?
+  totalReturn  Float?
+  episodes     Int?
+  trainedAt    DateTime  @default(now())
+  promotedAt   DateTime?
+  archivedAt   DateTime?
+  notes        String?
+
+  @@index([status])
+  @@index([trainedAt(sort: Desc)])
+}
+
+// ─── Telegram alerts ────────────────────────────────────────────────
+
+model TelegramLink {
+  id         String   @id @default(cuid())
+  userId     String
+  chatId     String   @unique
+  username   String?
+  firstName  String?
+  isActive   Boolean  @default(true)
+  /**
+   * Per-user alert preferences. Defaults are applied in service code.
+   * Shape:
+   * {
+   *   tradeOpened: boolean,
+   *   tradeClosed: boolean,
+   *   tradeFailed: boolean,
+   *   botLifecycle: boolean,
+   *   riskEvents: boolean,
+   *   advisor: boolean,
+   *   dailySummary: boolean,
+   *   marketShocks: boolean
+   * }
+   */
+  prefs      Json     @default("{}")
+  linkedAt   DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isActive])
+}
+
+/** Per-user DEX Jupiter auto-exit prefs (TP/SL/skim) — survives API restarts. */
+model JupiterExitConfig {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  enabled       Boolean  @default(true)
+  takeProfitPct Decimal  @default(0.5) @db.Decimal(8, 4)
+  stopLossPct   Decimal  @default(1.0) @db.Decimal(8, 4)
+  trailingStop  Boolean  @default(false)
+  profitSkim    Boolean  @default(true)
+  /** Trailing arms only after price reaches entry × (1 + activationPct/100). */
+  trailingActivationPct Decimal @default(0.8) @db.Decimal(8, 4)
+  /** Once armed, exit when price falls deltaPct below the peak. */
+  trailingDeltaPct Decimal @default(0.4) @db.Decimal(8, 4)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TelegramLinkCode {
+  code      String   @id
+  userId    String
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/**
+ * Persisted Binance CEX Super Machine (Auto Binance).
+ *
+ * The open lot lives here rather than in process memory so that a redeploy
+ * cannot orphan a live Binance position with no TP/SL watcher attached.
+ */
+model CexSuperMachineConfig {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  enabled              Boolean   @default(false)
+  exchangeConnectionId String?
+  watchSymbol          String    @default("BTCUSDT") @db.VarChar(32)
+  maxTradeUsd          Decimal   @default(25) @db.Decimal(18, 8)
+  emergencyStop        Boolean   @default(false)
+  /** Open long lot — all null when flat. */
+  openSymbol           String?   @db.VarChar(32)
+  openPair             String?   @db.VarChar(32)
+  openEntryPrice       Decimal?  @db.Decimal(18, 8)
+  openBaseQty          Decimal?  @db.Decimal(28, 12)
+  openQuoteSpent       Decimal?  @db.Decimal(18, 8)
+  openedAt             DateTime?
+  /** Per-position exit overrides (null = user's global CexExitConfig). */
+  openTakeProfitPct    Decimal?  @db.Decimal(8, 4)
+  openStopLossPct      Decimal?  @db.Decimal(8, 4)
+  openTrailingStop     Boolean?
+  /** Highest bid seen since entry — persisted so trailing survives restarts. */
+  openTrailingPeak     Decimal?  @db.Decimal(18, 8)
+  /** USDT profit banked via manual skims while this lot stays open. */
+  openSkimmedUsd       Decimal?  @db.Decimal(18, 8)
+  lastBuyAt            DateTime?
+  lastTickAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
+}
+
+/** Per-user take-profit / stop-loss for the Binance CEX book — survives API restarts. */
+model CexExitConfig {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  enabled       Boolean  @default(true)
+  takeProfitPct Decimal  @db.Decimal(8, 4)
+  stopLossPct   Decimal  @db.Decimal(8, 4)
+  /** At take-profit, sell only the profit slice into USDT and keep the runner (falls back to a full TP close when the slice is under Binance's minimum order). */
+  profitSkim    Boolean  @default(false)
+  trailingStop  Boolean  @default(false)
+  /** Trailing arms only after price reaches entry × (1 + activationPct/100). */
+  trailingActivationPct Decimal @default(0.8) @db.Decimal(8, 4)
+  /** Once armed, exit when price falls deltaPct below the peak. */
+  trailingDeltaPct Decimal @default(0.4) @db.Decimal(8, 4)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/**
+ * A fiat on-ramp or off-ramp attempt. Settlement happens entirely inside
+ * Transak/MoonPay, so this is our own record of what the user started and where
+ * the funds were meant to land — without it a user who closes the provider tab
+ * has no way to see whether an order went through.
+ *
+ * `partnerOrderId` is the id we hand the provider so its webhooks can be
+ * matched back to a row.
+ */
+model FiatRampOrder {
+  id             String   @id @default(cuid())
+  userId         String
+  /** Id sent to the provider for webhook reconciliation. */
+  partnerOrderId String   @unique
+  provider       String
+  direction      String
+  chain          String
+  fiatCurrency   String
+  cryptoCurrency String
+  fiatAmount     Decimal? @db.Decimal(20, 8)
+  cryptoAmount   Decimal? @db.Decimal(30, 12)
+  /** Address funds were routed to, platform or the user's own wallet. */
+  walletAddress  String
+  walletSource   String   @default("platform")
+  status         String   @default("created")
+  /** Provider's own order id, known only once it reports back. */
+  providerOrderId String?
+  txHash         String?
+  failureReason  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+/** Persisted 24/7 multi-agent Jupiter auto-trader (Super Machine v2). */
+model JupiterSuperMachineConfig {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  enabled           Boolean  @default(false)
+  maxTradeUsd       Decimal  @default(25) @db.Decimal(18, 8)
+  maxOpenPositions  Int      @default(3)
+  maxDailyTrades    Int      @default(20)
+  maxDailyVolumeUsd Decimal  @default(500) @db.Decimal(18, 8)
+  minLiquidityUsd   Decimal  @default(100000) @db.Decimal(18, 8)
+  minSignal         String   @default("rising")
+  /** When set (e.g. SOLUSDT), Super Machine only trades this pair — not the global trending scanner. */
+  watchSymbol       String?  @db.VarChar(32)
+  emergencyStop     Boolean  @default(false)
+  aggressiveMode    Boolean  @default(false)
+  trailingEntry     Boolean  @default(true)
+  lastTickAt        DateTime?
+  lastTradeAt       DateTime?
+  tradesToday       Int      @default(0)
+  volumeTodayUsd    Decimal  @default(0) @db.Decimal(18, 8)
+  dayKey            String?
+  botRunId          String?
+  startedAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
+}
