@@ -42,3 +42,37 @@ jobs:
           cache-from: type=gha,scope=gdsl-api
           cache-to: type=gha,mode=max,scope=gdsl-api
           provenance: false
+
+  deploy:
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Pull and restart API on droplet
+        env:
+          SSH_KEY: ${{ secrets.DROPLET_SSH_KEY }}
+          HOST: ${{ secrets.DROPLET_HOST }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          API_IMAGE: ${{ env.IMAGE }}:latest
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          ssh -o StrictHostKeyChecking=yes "root@${HOST}" bash -s \
+            "$GHCR_TOKEN" "$ACTOR" "$API_IMAGE" <<'REMOTE'
+          set -euo pipefail
+          echo "$1" | docker login ghcr.io -u "$2" --password-stdin
+          cd /opt/trade_bot
+          touch .env
+          if grep -q '^API_IMAGE=' .env; then
+            sed -i "s|^API_IMAGE=.*|API_IMAGE=$3|" .env
+          else
+            echo "API_IMAGE=$3" >> .env
+          fi
+          export API_IMAGE="$3"
+          docker compose pull api
+          docker compose up -d api
+          REMOTE
