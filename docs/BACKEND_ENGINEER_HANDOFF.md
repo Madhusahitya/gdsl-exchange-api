@@ -6,10 +6,15 @@ This is the **standalone API repo**. Clone only this — not `gdsl-exchange` (th
 git clone git@github.com:Madhusahitya/gdsl-exchange-api.git
 cd gdsl-exchange-api
 cp .env.example .env
+# Required — or Jupiter/personal-wallet routes return 503:
+# node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# Paste into .env as WALLET_ENCRYPTION_KEY=...
 npm install
 npm run db:migrate
 npm run dev    # http://localhost:4000/health
 ```
+
+**Required local env vars:** `DATABASE_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`, **`WALLET_ENCRYPTION_KEY`** (64 hex chars).
 
 ---
 
