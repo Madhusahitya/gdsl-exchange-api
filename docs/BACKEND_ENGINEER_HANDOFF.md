@@ -13,36 +13,68 @@ npm run dev    # http://localhost:4000/health
 
 ---
 
-## 1. Database export (production)
+## 1. SSH access (production server)
 
-You will receive a plain connection string like:
+| Field | Value |
+|-------|--------|
+| **Host** | `157.245.100.175` |
+| **User** | `root` |
+| **Port** | `22` (default) |
+| **App path on server** | `/opt/trade_bot` |
+| **Production URL** | https://trade.godslandx.com |
 
-```text
-postgresql://postgres:PASSWORD@127.0.0.1:5433/cryptoflow
-```
-
-**SSH to the server** (team lead adds your public key first):
+**Login (after your public key is added):**
 
 ```bash
 ssh root@157.245.100.175
 ```
 
-**Export on the server:**
+**First time setup on your laptop** — generate a key if you don't have one:
 
 ```bash
-pg_dump 'postgresql://postgres:PASSWORD@127.0.0.1:5433/cryptoflow' --no-owner --no-acl > cryptoflow_backup.sql
+ssh-keygen -t ed25519 -C "your-email@example.com"
+cat ~/.ssh/id_ed25519.pub
 ```
 
-Or if you already have SSH:
+Send the **`.pub` file contents** to the team lead (Signal/WhatsApp). They add it to the server; you do **not** need a password if key auth is set up.
+
+**Useful commands once logged in:**
 
 ```bash
-grep DATABASE_URL /opt/trade_bot/.env
-# use with pg_dump; replace postgres:5432 → 127.0.0.1:5433 if needed
+cd /opt/trade_bot
+docker compose ps                    # api, web, postgres status
+docker compose logs -f api --tail 100
+grep DATABASE_URL .env               # DB connection (internal Docker URL)
+curl -s http://127.0.0.1:4000/health # API health on the host
 ```
 
 ---
 
-## 2. API layout
+## 2. Database export (production)
+
+You will receive a plain connection string (from team lead):
+
+```text
+postgresql://postgres:PASSWORD@127.0.0.1:5433/cryptoflow
+```
+
+**SSH in first**, then export:
+
+```bash
+ssh root@157.245.100.175
+pg_dump 'postgresql://postgres:PASSWORD@127.0.0.1:5433/cryptoflow' --no-owner --no-acl > cryptoflow_backup.sql
+```
+
+Or read the URL from the server:
+
+```bash
+grep DATABASE_URL /opt/trade_bot/.env
+# for pg_dump on the host, use 127.0.0.1:5433 instead of postgres:5432
+```
+
+---
+
+## 3. API layout
 
 | Path | Purpose |
 |------|---------|
@@ -57,7 +89,7 @@ grep DATABASE_URL /opt/trade_bot/.env
 
 ---
 
-## 3. WebSockets — already exist
+## 4. WebSockets — already exist
 
 Extend `apps/api/src/server/socketServer.ts`. Emit from routes via `getSocketIo()` in `apps/api/src/lib/realtimeHub.ts`.
 
@@ -72,7 +104,7 @@ Extend `apps/api/src/server/socketServer.ts`. Emit from routes via `getSocketIo(
 
 ---
 
-## 4. High traffic — suggested approach
+## 5. High traffic — suggested approach
 
 1. Profile `/metrics` and logs for 429/503 routes
 2. Move hot polling to Socket.IO
@@ -81,7 +113,7 @@ Extend `apps/api/src/server/socketServer.ts`. Emit from routes via `getSocketIo(
 
 ---
 
-## 5. Deploy
+## 6. Deploy
 
 Merge to `main` → **Build API image** workflow → `ghcr.io/madhusahitya/gdsl-exchange-api:latest`
 
