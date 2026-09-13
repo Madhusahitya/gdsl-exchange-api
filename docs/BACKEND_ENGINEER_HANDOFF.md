@@ -57,7 +57,71 @@ curl -s http://127.0.0.1:4000/health # API health on the host
 
 ---
 
-## 2. Database export (production)
+## 2. Docker — local dev vs production
+
+There is **no Docker Hub account**. Production images live on **GitHub Container Registry (GHCR)**.
+
+| Image | Registry path |
+|-------|----------------|
+| API | `ghcr.io/madhusahitya/gdsl-exchange-api:latest` |
+| Web | `ghcr.io/madhusahitya/gdsl-exchange-web:latest` |
+
+### Recommended: build locally (no registry login)
+
+For day-to-day API / WebSocket work, **do not pull production images**. Build from this repo:
+
+```bash
+cd gdsl-exchange-api
+cp .env.example .env
+# set DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, WALLET_ENCRYPTION_KEY
+docker compose up --build
+```
+
+Or without Docker:
+
+```bash
+npm install
+npm run db:migrate
+npm run dev    # http://localhost:4000/health
+```
+
+### Production server (SSH) — no Docker login needed
+
+After `ssh root@157.245.100.175`, the droplet is **already logged in** to GHCR. Use:
+
+```bash
+cd /opt/trade_bot
+docker compose ps
+docker compose logs -f api --tail 100
+docker compose pull api    # only when team lead asks you to deploy
+docker compose up -d api
+```
+
+You do **not** need separate Docker credentials when working **on the server via SSH**.
+
+### Optional: pull private GHCR images on your laptop
+
+Packages are **private**. Only needed if you must run the exact production image locally (unusual).
+
+Ask the team lead for a GitHub **Personal Access Token** with **`read:packages`** (send over Signal — never email/Slack).
+
+```bash
+echo 'PASTE_GITHUB_PAT' | docker login ghcr.io -u Madhusahitya --password-stdin
+docker pull ghcr.io/madhusahitya/gdsl-exchange-api:latest
+docker pull ghcr.io/madhusahitya/gdsl-exchange-web:latest
+```
+
+| Field | Value |
+|-------|--------|
+| Registry | `ghcr.io` |
+| Username | `Madhusahitya` |
+| Password | GitHub PAT (**not** your GitHub password) |
+
+**Team lead:** GitHub → Settings → Developer settings → Personal access tokens → fine-grained token → Packages: Read-only on `gdsl-exchange-api` and `gdsl-exchange`.
+
+---
+
+## 3. Database export (production)
 
 You will receive a plain connection string (from team lead):
 
@@ -81,7 +145,7 @@ grep DATABASE_URL /opt/trade_bot/.env
 
 ---
 
-## 3. API layout
+## 4. API layout
 
 | Path | Purpose |
 |------|---------|
@@ -96,7 +160,7 @@ grep DATABASE_URL /opt/trade_bot/.env
 
 ---
 
-## 4. WebSockets — already exist
+## 5. WebSockets — already exist
 
 Extend `apps/api/src/server/socketServer.ts`. Emit from routes via `getSocketIo()` in `apps/api/src/lib/realtimeHub.ts`.
 
@@ -111,7 +175,7 @@ Extend `apps/api/src/server/socketServer.ts`. Emit from routes via `getSocketIo(
 
 ---
 
-## 5. High traffic — suggested approach
+## 6. High traffic — suggested approach
 
 1. Profile `/metrics` and logs for 429/503 routes
 2. Move hot polling to Socket.IO
@@ -120,7 +184,7 @@ Extend `apps/api/src/server/socketServer.ts`. Emit from routes via `getSocketIo(
 
 ---
 
-## 6. Deploy
+## 7. Deploy
 
 Merge to `main` → **Build API image** workflow → `ghcr.io/madhusahitya/gdsl-exchange-api:latest`
 
