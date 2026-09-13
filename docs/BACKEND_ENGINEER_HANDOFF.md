@@ -87,30 +87,19 @@ echo 'TOKEN' | docker login ghcr.io -u Madhusahitya --password-stdin
 
 ## Where the code is
 
-Main entry: `apps/api/src/index.ts` (thin boot)
+Main entry: `apps/api/src/index.ts`
 
-Your area for WebSockets / traffic work:
+- `apps/api/src/server/socketServer.ts` — Socket.IO
+- `apps/api/src/server/registerRoutes.ts` — routes
+- `apps/api/src/lib/realtimeHub.ts` — `getSocketIo()` for emitting from routes
+- `apps/api/src/routes/` — HTTP handlers
+- `apps/api/src/services/` — business logic
+- `packages/db/prisma/schema.prisma` — DB schema
 
-- `apps/api/src/server/socketServer.ts` — start here
-- `apps/api/src/server/registerRoutes.ts` — all routes mounted here
-- `apps/api/src/lib/realtimeHub.ts` — emit events from routes with `getSocketIo()`
-
-Routes are split under `apps/api/src/routes/`. Business logic in `apps/api/src/services/`. DB schema in `packages/db/prisma/schema.prisma`.
-
-Socket.IO is already wired — extend it, don't rebuild from scratch. Events already going out: `trade:executed`, `trade:failed`, `performance:update`, `portfolio:update`, `cex-sm:trade`, `positions:refresh`.
-
----
-
-## What I need you to focus on
-
-We're hitting API failures and too much polling under load. Profile first (`/metrics`, logs, which routes 429/503), then move hot paths to sockets instead of HTTP polling where it makes sense.
-
-Don't touch hot wallet signing, live Jupiter/Binance execution, or prod `.env` without checking with me first.
+Socket events in use: `trade:executed`, `trade:failed`, `performance:update`, `portfolio:update`, `cex-sm:trade`, `positions:refresh`.
 
 ---
 
 ## Deploy
 
-Push to `main` on this repo. The `gdsl-exchange` repo's GitHub Action builds the docker image and deploys to the droplet. Image: `ghcr.io/madhusahitya/gdsl-exchange-api:latest`.
-
-Ping me if you're stuck.
+Push to `main`. The `gdsl-exchange` repo's GitHub Action builds the image and deploys. Image: `ghcr.io/madhusahitya/gdsl-exchange-api:latest`.
