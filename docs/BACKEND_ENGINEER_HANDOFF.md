@@ -21,7 +21,9 @@ npm run dev    # http://localhost:4000/health
 | **User** | `root` |
 | **Port** | `22` (default) |
 | **App path on server** | `/opt/trade_bot` |
-| **Production URL** | https://trade.godslandx.com |
+| **Production URL (web)** | https://trade.godslandx.com |
+| **Production URL (API + WebSocket)** | https://api.godslandx.com |
+| **WebSocket URL** | `wss://api.godslandx.com` |
 
 **Login (after your public key is added):**
 
@@ -117,4 +119,8 @@ Extend `apps/api/src/server/socketServer.ts`. Emit from routes via `getSocketIo(
 
 Merge to `main` → **Build API image** workflow → `ghcr.io/madhusahitya/gdsl-exchange-api:latest`
 
-Production site: [trade.godslandx.com](https://trade.godslandx.com)
+Production:
+- Web: [trade.godslandx.com](https://trade.godslandx.com)
+- API: [api.godslandx.com/health](https://api.godslandx.com/health)
+
+**SSL:** Let's Encrypt on the droplet (auto-renew). No separate SSL login — use HTTPS URLs above.
