@@ -23,12 +23,12 @@ services:
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
     ports:
-      - '4000:4000'
+      - '8000:8000'
     env_file:
       - .env
     environment:
       NODE_ENV: production
-      PORT: 4000
+      PORT: 8000
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cryptoflow}
     depends_on:
       postgres:

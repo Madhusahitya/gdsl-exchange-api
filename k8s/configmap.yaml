@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gdsl-exchange-api-config
+  namespace: default
+  labels:
+    app.kubernetes.io/name: gdsl-exchange-api
+    app.kubernetes.io/component: backend
+data:
+  NODE_ENV: "production"
+  PORT: "8000"
+  LOG_LEVEL: "info"
+  FRONTEND_URL: "https://trade.godslandx.com"
+  NEXT_PUBLIC_APP_URL: "https://trade.godslandx.com"
+  APP_BASE_URL: "https://trade.godslandx.com"
+  COOKIE_DOMAIN: "godslandx.com"
+  ENABLE_RL_SHADOW: "true"
+  LIVE_EXECUTION_DISABLED: "false"
+  EXEC_MIN_CONFIDENCE: "0.15"
+  NEXT_PUBLIC_BSC_RPC_URL: "https://bsc-dataseed.binance.org"

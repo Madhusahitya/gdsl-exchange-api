@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log
+Dockerfile
+docker-compose.yml
+.dockerignore
+.git
+.github
+.gitignore
+.env
+dist
+docs
+k8s
+docker
+.gemini
+test
+*.md

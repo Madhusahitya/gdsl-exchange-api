@@ -1,0 +1,54 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gdsl-exchange-api-ingress
+  namespace: default
+  labels:
+    app.kubernetes.io/name: gdsl-exchange-api
+    app.kubernetes.io/component: api-gateway
+  annotations:
+    # NGINX Ingress / API Gateway Annotations
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    
+    # Enable WebSocket upgrading for Socket.IO
+    nginx.ingress.kubernetes.io/websocket-services: "gdsl-exchange-api-service"
+    
+    # CORS Configuration for API Gateway
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://trade.godslandx.com"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,X-CF-Token"
+    
+    # Cert-Manager TLS (Optional: uncomment if using Let's Encrypt / cert-manager)
+    # cert-manager.io/cluster-issuer: "letsencrypt-production"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - trade.godslandx.com
+      secretName: gdsl-exchange-api-tls
+  rules:
+    - host: trade.godslandx.com
+      http:
+        paths:
+          # REST API & Health routes
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gdsl-exchange-api-service
+                port:
+                  number: 8000
+          # Real-time WebSocket connection route (Socket.IO)
+          - path: /socket.io
+            pathType: Prefix
+            backend:
+              service:
+                name: gdsl-exchange-api-service
+                port:
+                  number: 8000
