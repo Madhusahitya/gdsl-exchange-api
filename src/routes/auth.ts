@@ -413,10 +413,11 @@ router.post('/login', validate(loginSchema), asyncHandler(async (req: Request, r
   const rawIdentifier = (req as Request & { validated: { identifier: string; password: string } }).validated.identifier
   const password = (req as Request & { validated: { identifier: string; password: string } }).validated.password
   const identifier = rawIdentifier.trim().toLowerCase()
+  console.log('identifier', identifier);
 
   // Block login for internal system / paper-trader accounts (still email-shaped).
   if (identifier === GLOBAL_PAPER_EMAIL || identifier === 'system.paperbot@cryptoflow.internal') {
-    res.status(401).json({ error: 'Invalid credentials' })
+    res.status(401).json({ error: 'Invalid credentialsss' })
     return
   }
 

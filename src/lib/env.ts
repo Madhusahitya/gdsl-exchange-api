@@ -1,4 +1,12 @@
+import { config as loadDotenv } from 'dotenv'
+import { resolve as resolvePath } from 'node:path'
 import { z } from 'zod'
+
+loadDotenv()
+loadDotenv({ path: resolvePath(process.cwd(), '.env') })
+loadDotenv({ path: resolvePath(__dirname, '..', '.env') })
+loadDotenv({ path: resolvePath(__dirname, '..', '..', '.env') })
+loadDotenv({ path: resolvePath(__dirname, '..', '..', '..', '.env') })
 
 function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
   if (value === undefined) return defaultValue
