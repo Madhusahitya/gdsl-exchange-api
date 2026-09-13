@@ -80,20 +80,20 @@ grep DATABASE_URL /opt/trade_bot/.env
 
 | Path | Purpose |
 |------|---------|
-| `apps/api/src/index.ts` | Thin boot |
-| `apps/api/src/server/createApp.ts` | Express + middleware |
-| `apps/api/src/server/registerRoutes.ts` | All `/api/*` routers |
-| `apps/api/src/server/socketServer.ts` | **Socket.IO — your main file** |
-| `apps/api/src/server/backgroundJobs.ts` | Watchers, intervals |
-| `apps/api/src/routes/*.ts` | HTTP handlers |
-| `apps/api/src/services/**` | Business logic |
+| `src/index.ts` | Thin boot |
+| `src/server/createApp.ts` | Express + middleware |
+| `src/server/registerRoutes.ts` | All `/api/*` routers |
+| `src/server/socketServer.ts` | **Socket.IO — your main file** |
+| `src/server/backgroundJobs.ts` | Watchers, intervals |
+| `src/routes/*.ts` | HTTP handlers |
+| `src/services/**` | Business logic |
 | `packages/db/prisma/schema.prisma` | Database schema |
 
 ---
 
 ## 4. WebSockets — already exist
 
-Extend `apps/api/src/server/socketServer.ts`. Emit from routes via `getSocketIo()` in `apps/api/src/lib/realtimeHub.ts`.
+Extend `src/server/socketServer.ts`. Emit from routes via `getSocketIo()` in `src/lib/realtimeHub.ts`.
 
 | Event | Direction |
 |-------|-----------|

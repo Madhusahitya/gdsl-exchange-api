@@ -2,7 +2,7 @@
  * Idempotent seed for the 5 pre-provisioned internal operators.
  *
  * Run inside the API container after a deploy:
- *   docker compose exec api node apps/api/dist/scripts/seedInternalUsers.js
+ *   docker compose exec api node dist/scripts/seedInternalUsers.js
  *
  * Passwords come from env — never commit them:
  *   SEED_PASSWORD_godsland100=...

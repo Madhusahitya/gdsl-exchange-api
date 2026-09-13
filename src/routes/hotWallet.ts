@@ -35,7 +35,7 @@ router.get(
       res.json({
         configured: false,
         message:
-          'Set HOT_WALLET_PRIVATE_KEY in apps/api/.env on the server. Never commit keys or paste them into chat.',
+          'Set HOT_WALLET_PRIVATE_KEY in .env on the server. Never commit keys or paste them into chat.',
       })
       return
     }

@@ -10,7 +10,7 @@ function formatBinanceHttpError(status: number, body: string): string {
     const j = JSON.parse(body) as { code?: number; msg?: string }
     if (j.code === -2015) {
       hint =
-        ' — Binance -2015: wrong API secret, key disabled, IP not whitelisted (add the "Outbound IP" from the Exchange page if you use IP restrictions), missing "Enable Reading", or this app is on MAINNET (`api.binance.com`) while the key is for TESTNET (set BINANCE_BASE_URL=https://testnet.binance.vision in apps/api `.env` and restart).'
+        ' — Binance -2015: wrong API secret, key disabled, IP not whitelisted (add the "Outbound IP" from the Exchange page if you use IP restrictions), missing "Enable Reading", or this app is on MAINNET (`api.binance.com`) while the key is for TESTNET (set BINANCE_BASE_URL=https://testnet.binance.vision in `.env` and restart).'
     }
   } catch {
     /* body not JSON */

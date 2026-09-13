@@ -5,7 +5,6 @@ import fs from 'fs'
 function tryLoadEnvFiles(): void {
   const roots = [
     process.cwd(),
-    path.resolve(process.cwd(), 'apps/api'),
     path.resolve(process.cwd(), '..'),
   ]
   const names = ['.env', '.env.local']
@@ -46,7 +45,7 @@ export function loadExecutorConfig(): ExecutorConfig {
 
   if (!apiKey || !apiSecret) {
     throw new Error(
-      'Missing BINANCE_API_KEY or BINANCE_API_SECRET. Set them in .env or apps/api/.env (read-only keys recommended for demo).'
+      'Missing BINANCE_API_KEY or BINANCE_API_SECRET. Set them in .env (read-only keys recommended for demo).'
     )
   }
 

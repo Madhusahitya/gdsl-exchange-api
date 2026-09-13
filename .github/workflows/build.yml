@@ -23,9 +23,7 @@ jobs:
 
       - run: npm ci
       - run: npx prisma generate --schema=packages/db/prisma/schema.prisma
-      - run: npm run build:packages
-      - run: npm run build --workspace=apps/api
-      - run: npm run test --workspace=@cryptoflow/api
+      - run: npm run build
 
   trigger-production-build:
     needs: [test]
