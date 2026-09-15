@@ -38,7 +38,7 @@ router.get(
         ip,
         source: 'api.ipify.org',
         note:
-          'Add this address to your Binance API key IP whitelist (if enabled). Requests are made from the host that runs apps/api — same IP for all Binance calls from this server.',
+          'Add this address to your Binance API key IP whitelist (if enabled). Requests are made from the host that runs the API — same IP for all Binance calls from this server.',
       })
     } catch (e) {
       res.status(502).json({

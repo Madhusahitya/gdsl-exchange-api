@@ -46,7 +46,7 @@ export function loadExecutorConfig(): ExecutorConfig {
 
   if (!apiKey || !apiSecret) {
     throw new Error(
-      'Missing BINANCE_API_KEY or BINANCE_API_SECRET. Set them in .env or apps/api/.env (read-only keys recommended for demo).'
+      'Missing BINANCE_API_KEY or BINANCE_API_SECRET. Set them in .env (read-only keys recommended for demo).'
     )
   }
 

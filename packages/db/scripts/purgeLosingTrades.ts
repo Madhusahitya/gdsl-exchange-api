@@ -11,7 +11,7 @@ import path from 'path'
 
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('dotenv').config({ path: path.join(__dirname, '../../../apps/api/.env') })
+  require('dotenv').config({ path: path.join(__dirname, '../../../.env') })
 } catch {
   /* optional */
 }
