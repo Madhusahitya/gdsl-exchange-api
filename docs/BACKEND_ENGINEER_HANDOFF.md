@@ -13,7 +13,8 @@ npm run db:migrate
 npm run dev
 ```
 
-Health check: http://localhost:4000/health
+Health check (local dev): http://localhost:8000/health  
+Production / Docker on the droplet: port **4000** (`http://127.0.0.1:4000/health`)
 
 Fill in `.env` properly or stuff will break. Minimum you need:
 

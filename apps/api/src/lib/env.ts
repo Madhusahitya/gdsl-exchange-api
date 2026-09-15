@@ -8,6 +8,7 @@ function parseBoolean(value: string | undefined, defaultValue: boolean): boolean
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  /** Local dev default is 8000; production Docker/nginx uses 4000 (set PORT in .env). */
   PORT: z.coerce.number().default(8000),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 chars'),
