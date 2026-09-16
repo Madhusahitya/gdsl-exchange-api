@@ -30,7 +30,7 @@ import {
 } from '@cryptoflow/db'
 import { BSC_TOKEN_BINANCE_BY_SYMBOL } from '../../lib/bscTokenCatalog'
 import { SOL_TOKEN_BINANCE_BY_SYMBOL } from '../../lib/solDexCatalog'
-import { displayNetRoundTripPnl } from '../../lib/roundTripPnl'
+import { displayNetRoundTripPnl, shouldIncludeClosedTradeInPublicLog } from '../../lib/roundTripPnl'
 import { logger } from '../../lib/logger'
 import { quoteOneInchSellUsdPerToken } from '../dex/oneInchMarkService'
 import { quoteJupiterSellUsdPerToken } from '../dex/jupiterMarkService'
@@ -215,6 +215,7 @@ export async function computeUserEquity(userId: string): Promise<EquitySnapshot>
     prisma.trade.findMany({
       where: { userId, status: TradeStatus.CLOSED, exitPrice: { not: null }, ...EXCLUDE_SELF_CUSTODY },
       select: {
+        pair: true,
         pnl: true,
         allocationUsd: true,
         entryPrice: true,
@@ -249,13 +250,16 @@ export async function computeUserEquity(userId: string): Promise<EquitySnapshot>
   const totalDeposits = decimalToNumber(depositsAgg._sum.amount)
   const totalWithdrawals = decimalToNumber(withdrawalsAgg._sum.amount)
   const realizedPnlAllTime = closedTrades.reduce((acc, t) => {
-    const pnl = displayNetRoundTripPnl({
+    const row = {
       pnl: t.pnl,
       allocationUsd: t.allocationUsd,
       entryPrice: t.entryPrice,
       exitPrice: t.exitPrice,
+      pair: t.pair,
       strategyName: t.strategy.name,
-    })
+    }
+    if (!shouldIncludeClosedTradeInPublicLog(row)) return acc
+    const pnl = displayNetRoundTripPnl(row)
     return acc + (pnl ?? 0)
   }, 0)
   const realizedEquity = totalDeposits - totalWithdrawals + realizedPnlAllTime
@@ -454,6 +458,7 @@ export async function summarizeLedgerWindow(
         ...EXCLUDE_SELF_CUSTODY,
       },
       select: {
+        pair: true,
         pnl: true,
         allocationUsd: true,
         entryPrice: true,
@@ -474,13 +479,16 @@ export async function summarizeLedgerWindow(
   /** Ignore noise around zero so $0.00 slippage rows don’t count as a “loss”. */
   const pnlWinLossEps = 1e-6
   for (const t of trades) {
-    const pnl = displayNetRoundTripPnl({
+    const row = {
       pnl: t.pnl,
       allocationUsd: t.allocationUsd,
       entryPrice: t.entryPrice,
       exitPrice: t.exitPrice,
+      pair: t.pair,
       strategyName: t.strategy.name,
-    })
+    }
+    if (!shouldIncludeClosedTradeInPublicLog(row)) continue
+    const pnl = displayNetRoundTripPnl(row)
     if (pnl == null) continue
     tradeCount += 1
     realizedPnl += pnl

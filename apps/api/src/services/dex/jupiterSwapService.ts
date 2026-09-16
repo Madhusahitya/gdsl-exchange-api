@@ -22,7 +22,7 @@ import {
   listSolanaHoldings,
   sendSolanaTokenFromUser,
 } from '../wallet/solanaPersonalWalletService'
-import { type ResolvedSolToken } from './solTokenResolver'
+import { hydrateSolTokenDecimals, type ResolvedSolToken } from './solTokenResolver'
 import { getJupiterTradableToken } from './jupiterTradableRegistry'
 import {
   submitJupiterExecute,
@@ -167,6 +167,31 @@ function tokenQtyForUsdNotional(usd: number, usdPerToken: number | null, decimal
   const raw = usd / usdPerToken
   const factor = 10 ** Math.min(decimals, 8)
   return Math.floor(raw * factor) / factor
+}
+
+/** Reject fill prices that still diverge wildly from Jupiter mark after on-chain decimals. */
+async function reconcileFillPriceWithMark(
+  mint: string,
+  fillPrice: number,
+  side: 'BUY' | 'SELL',
+): Promise<number> {
+  if (!Number.isFinite(fillPrice) || fillPrice <= 0) return fillPrice
+  try {
+    const prices = await fetchJupiterPricesV3([mint])
+    const mark = prices.get(mint)?.usdPrice
+    if (!mark || mark <= 0) return fillPrice
+    const ratio = fillPrice / mark
+    if (ratio > 4 || ratio < 0.25) {
+      logger.error(
+        { mint, fillPrice, mark, side, ratio },
+        '[jupiter] fill price implausible vs Jupiter mark — clamping to mark for trade log',
+      )
+      return mark
+    }
+  } catch (err) {
+    logger.warn({ err, mint }, '[jupiter] fill price mark check failed')
+  }
+  return fillPrice
 }
 
 async function ensureJupiterStrategyId(): Promise<string> {
@@ -827,8 +852,8 @@ export async function previewJupiterSwap(
   if (!isJupiterConfigured()) {
     throw new Error('Jupiter is not configured on this server (JUPITER_API_KEY).')
   }
-  const token = await getJupiterTradableToken(req.binanceSymbol)
-  if (!token) {
+  const tokenRaw = await getJupiterTradableToken(req.binanceSymbol)
+  if (!tokenRaw) {
     return {
       binanceSymbol: req.binanceSymbol.toUpperCase(),
       side: req.side,
@@ -855,6 +880,7 @@ export async function previewJupiterSwap(
       message: `Token ${req.binanceSymbol} is listed but mint could not be resolved — wait for token list refresh or pick another pair.`,
     }
   }
+  const token = await hydrateSolTokenDecimals(tokenRaw)
 
   let quoteAmount = req.amount
   // Mid reference only — passing buyUsd/positionQty here duplicates the main /order
@@ -1219,10 +1245,11 @@ export async function executeJupiterSwap(
     }
   }
 
-  const token = await getJupiterTradableToken(req.binanceSymbol)
-  if (!token) {
+  const tokenRaw = await getJupiterTradableToken(req.binanceSymbol)
+  if (!tokenRaw) {
     throw new Error(`This pair is not available on Solana via Jupiter (${req.binanceSymbol}).`)
   }
+  const token = await hydrateSolTokenDecimals(tokenRaw)
 
   const slippageBps = Math.min(2000, Math.max(10, req.slippageBps ?? 100))
   const spend =
@@ -1341,12 +1368,13 @@ export async function executeJupiterSwap(
     entryPriceEff = amountInNum > 1e-18 ? quotedOutNum / amountInNum : quotedOutNum
   }
 
-  const safeEntry =
+  let safeEntry =
     Number.isFinite(entryPriceEff) && entryPriceEff > 0
       ? entryPriceEff
       : req.side === 'BUY'
         ? amountInNum / Math.max(quotedOutNum, 1e-18)
         : quotedOutNum / Math.max(amountInNum, 1e-18)
+  safeEntry = await reconcileFillPriceWithMark(token.mint, safeEntry, req.side)
   const safeAlloc = Number.isFinite(allocationUsd) ? Math.round(allocationUsd * 1e8) / 1e8 : 0
   const pair = `${token.baseSymbol}/USDT`
   const strategyId = await ensureJupiterStrategyId()

@@ -6,7 +6,11 @@ import { validate } from '../middleware/validate'
 import { asyncHandler } from '../middleware/asyncHandler'
 import { tradesQuerySchema } from '../validators'
 import { getSocketIo } from '../lib/realtimeHub'
-import { displayRoundTripPnl, displayNetRoundTripPnl } from '../lib/roundTripPnl'
+import {
+  displayRoundTripPnl,
+  displayNetRoundTripPnl,
+  shouldIncludeClosedTradeInPublicLog,
+} from '../lib/roundTripPnl'
 import { reconcileStaleJupiterOpenTrades } from '../services/dex/jupiterSwapService'
 
 const router = Router()
@@ -69,7 +73,19 @@ router.get('/', authenticateToken, validate(tradesQuerySchema), asyncHandler(asy
     return 'SELL'
   }
 
-  const trades = rows.map((trade) => {
+  const visibleRows = rows.filter((trade) => {
+    if (trade.status !== TradeStatus.CLOSED || trade.exitPrice == null) return true
+    return shouldIncludeClosedTradeInPublicLog({
+      pnl: trade.pnl,
+      allocationUsd: trade.allocationUsd,
+      entryPrice: trade.entryPrice,
+      exitPrice: trade.exitPrice,
+      pair: trade.pair,
+      strategyName: trade.strategy.name,
+    })
+  })
+
+  const trades = visibleRows.map((trade) => {
     const exitPrice = trade.exitPrice ? Number(trade.exitPrice) : null
     const storedPnl = trade.pnl != null ? Number(trade.pnl) : null
     const pnlRow = {
