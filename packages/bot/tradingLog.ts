@@ -1,5 +1,4 @@
-import { prisma } from '@cryptoflow/db'
-import type { Prisma } from '@prisma/client'
+import { prisma, type Prisma } from '@cryptoflow/db'
 
 export type TradingLogKind =
   | 'SIGNAL'
