@@ -128,14 +128,14 @@ export function isCorruptDexFillPrices(row: RoundTripPnlRow & { pair?: string | 
   return false
 }
 
-/** Closed round-trips shown in trade log / investor stats (wins only, no corrupt fills). */
+/**
+ * Hide only corrupt decimal/price rows (e.g. GLDX at $3,755). Real wins and
+ * losses stay in the trade log and profit stats — do not filter negatives.
+ */
 export function shouldIncludeClosedTradeInPublicLog(
   row: RoundTripPnlRow & { pair?: string | null; strategyName?: string | null },
 ): boolean {
-  if (isCorruptDexFillPrices(row)) return false
-  const net = displayNetRoundTripPnl(row)
-  if (net == null) return false
-  return net > 1e-6
+  return !isCorruptDexFillPrices(row)
 }
 
 /** PnL safe to show in trade log / dashboard stats. */

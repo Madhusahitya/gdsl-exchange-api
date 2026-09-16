@@ -73,19 +73,20 @@ router.get('/', authenticateToken, validate(tradesQuerySchema), asyncHandler(asy
     return 'SELL'
   }
 
-  const visibleRows = rows.filter((trade) => {
-    if (trade.status !== TradeStatus.CLOSED || trade.exitPrice == null) return true
-    return shouldIncludeClosedTradeInPublicLog({
-      pnl: trade.pnl,
-      allocationUsd: trade.allocationUsd,
-      entryPrice: trade.entryPrice,
-      exitPrice: trade.exitPrice,
-      pair: trade.pair,
-      strategyName: trade.strategy.name,
+  // Drop only corrupt fill rows (wrong token decimals). All real wins/losses stay.
+  const trades = rows
+    .filter((trade) => {
+      if (trade.status !== TradeStatus.CLOSED || trade.exitPrice == null) return true
+      return shouldIncludeClosedTradeInPublicLog({
+        pnl: trade.pnl,
+        allocationUsd: trade.allocationUsd,
+        entryPrice: trade.entryPrice,
+        exitPrice: trade.exitPrice,
+        pair: trade.pair,
+        strategyName: trade.strategy.name,
+      })
     })
-  })
-
-  const trades = visibleRows.map((trade) => {
+    .map((trade) => {
     const exitPrice = trade.exitPrice ? Number(trade.exitPrice) : null
     const storedPnl = trade.pnl != null ? Number(trade.pnl) : null
     const pnlRow = {
