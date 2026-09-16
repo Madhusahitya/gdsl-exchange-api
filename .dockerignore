@@ -10,7 +10,6 @@ docker-compose.yml
 dist
 docs
 k8s
-docker
 .gemini
 test
 *.md

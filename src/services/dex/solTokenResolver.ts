@@ -3,6 +3,8 @@ import {
   SOL_USDC_MINT,
   type SolDexToken,
 } from '../../lib/solDexCatalog'
+import { logger } from '../../lib/logger'
+import { getSolanaMintDecimals } from '../wallet/solanaPersonalWalletService'
 import { getJupiterOrder, isJupiterConfigured } from './jupiterClassicService'
 import { env } from '../../lib/env'
 
@@ -77,6 +79,23 @@ async function jupiterBuyRouteOk(mint: string): Promise<boolean> {
     return BigInt(order.outAmount || '0') > 0n
   } catch {
     return false
+  }
+}
+
+/** Registry/search decimals can drift from chain — always prefer on-chain for swap math. */
+export async function hydrateSolTokenDecimals(token: ResolvedSolToken): Promise<ResolvedSolToken> {
+  try {
+    const onChain = await getSolanaMintDecimals(token.mint)
+    if (onChain !== token.decimals) {
+      logger.warn(
+        { mint: token.mint, symbol: token.baseSymbol, registry: token.decimals, onChain },
+        '[solToken] decimals mismatch — using on-chain value for swap/PnL',
+      )
+    }
+    return onChain === token.decimals ? token : { ...token, decimals: onChain }
+  } catch (err) {
+    logger.warn({ err, mint: token.mint }, '[solToken] on-chain decimals lookup failed — keeping registry value')
+    return token
   }
 }
 

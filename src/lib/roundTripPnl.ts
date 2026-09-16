@@ -16,6 +16,8 @@ export type RoundTripPnlRow = {
 /** Strategy book name for DEX Jupiter — must match DB `Strategy.name`. */
 export const JUPITER_DEX_STRATEGY_NAME = 'DEX Jupiter SOL'
 
+const MAJOR_BASES = new Set(['BTC', 'ETH', 'SOL', 'WBTC', 'WETH', 'JUP', 'BNB', 'XRP'])
+
 function toNum(v: unknown): number {
   if (v == null) return 0
   const n = Number(v)
@@ -101,6 +103,39 @@ export function netRoundTripPnlAfterGas(
 ): number | null {
   if (grossPnl == null || !Number.isFinite(grossPnl)) return null
   return Math.round((grossPnl - gasUsd) * 1e8) / 1e8
+}
+
+/**
+ * Detect rows where entry/exit prices are implausible (wrong token decimals, etc.).
+ * Example: GLDX $32 buy recorded at $3,755/token instead of ~$0.40.
+ */
+export function isCorruptDexFillPrices(row: RoundTripPnlRow & { pair?: string | null }): boolean {
+  const alloc = toNum(row.allocationUsd)
+  const entry = toNum(row.entryPrice)
+  const exit = toNum(row.exitPrice)
+  if (alloc <= 0 || entry <= 0 || exit <= 0) return false
+
+  const base = (row.pair ?? '').split('/')[0]?.toUpperCase() ?? ''
+  if (MAJOR_BASES.has(base)) return false
+
+  // Small alt/meme lots should never show hundreds–thousands $/token.
+  if (entry > 20 && alloc < 500) return true
+  if (exit > 20 && alloc < 500) return true
+
+  const impliedQty = alloc / entry
+  if (impliedQty > 0 && impliedQty < 0.02 && alloc >= 5) return true
+
+  return false
+}
+
+/**
+ * Hide only corrupt decimal/price rows (e.g. GLDX at $3,755). Real wins and
+ * losses stay in the trade log and profit stats — do not filter negatives.
+ */
+export function shouldIncludeClosedTradeInPublicLog(
+  row: RoundTripPnlRow & { pair?: string | null; strategyName?: string | null },
+): boolean {
+  return !isCorruptDexFillPrices(row)
 }
 
 /** PnL safe to show in trade log / dashboard stats. */

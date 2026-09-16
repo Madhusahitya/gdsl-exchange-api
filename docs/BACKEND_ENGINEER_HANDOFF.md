@@ -1,6 +1,8 @@
-# Backend engineer handoff
+# Backend handoff
 
-This is the **standalone API repo**. Clone only this — not `gdsl-exchange` (that repo is frontend/web only).
+Hey — this is the API repo. Don't clone `gdsl-exchange` for backend work; that's frontend only.
+
+## Get running locally
 
 ```bash
 git clone git@github.com:Madhusahitya/gdsl-exchange-api.git
@@ -8,76 +10,85 @@ cd gdsl-exchange-api
 cp .env.example .env
 npm install
 npm run db:migrate
-npm run dev    # http://localhost:4000/health
+npm run dev
 ```
+
+Health check (local dev): http://localhost:8000/health  
+Production / Docker on the droplet: port **4000** (`http://127.0.0.1:4000/health`)
+
+Fill in `.env` properly or stuff will break. Minimum you need:
+
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `ENCRYPTION_KEY`
+- `WALLET_ENCRYPTION_KEY` — without this you'll get `{"error":"WALLET_ENCRYPTION_KEY not configured"}` on Jupiter wallet routes. Generate one for local dev:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Paste that into `.env`. Use your own key locally. Don't use production's unless I send you a DB dump and tell you to.
+
+Docker works too if you prefer: `docker compose up --build` (same `.env`).
 
 ---
 
-## 1. SSH access (production server)
+## SSH (production server)
 
-| Field | Value |
-|-------|--------|
-| **Host** | `157.245.100.175` |
-| **User** | `root` |
-| **Port** | `22` (default) |
-| **App path on server** | `/opt/trade_bot` |
-| **Production URL (web)** | https://trade.godslandx.com |
-| **Production URL (API + WebSocket)** | https://api.godslandx.com |
-| **WebSocket URL** | `wss://api.godslandx.com` |
-
-**Login (after your public key is added):**
+Your key is already on the box. Just:
 
 ```bash
 ssh root@157.245.100.175
 ```
 
-**First time setup on your laptop** — generate a key if you don't have one:
-
-```bash
-ssh-keygen -t ed25519 -C "your-email@example.com"
-cat ~/.ssh/id_ed25519.pub
-```
-
-Send the **`.pub` file contents** to the team lead (Signal/WhatsApp). They add it to the server; you do **not** need a password if key auth is set up.
-
-**Useful commands once logged in:**
+App lives at `/opt/trade_bot`. Handy stuff once you're in:
 
 ```bash
 cd /opt/trade_bot
-docker compose ps                    # api, web, postgres status
+docker compose ps
 docker compose logs -f api --tail 100
-grep DATABASE_URL .env               # DB connection (internal Docker URL)
-curl -s http://127.0.0.1:4000/health # API health on the host
+curl -s http://127.0.0.1:4000/health
 ```
+
+Live site: https://trade.godslandx.com  
+API subdomain (SSL going up once DNS is done): https://api.godslandx.com  
+WebSockets: `wss://api.godslandx.com`
 
 ---
 
-## 2. Database export (production)
+## Database
 
-You will receive a plain connection string (from team lead):
+I'll send you the connection string on Signal separately.
 
-```text
-postgresql://postgres:PASSWORD@127.0.0.1:5433/cryptoflow
-```
-
-**SSH in first**, then export:
+SSH in, then:
 
 ```bash
-ssh root@157.245.100.175
 pg_dump 'postgresql://postgres:PASSWORD@127.0.0.1:5433/cryptoflow' --no-owner --no-acl > cryptoflow_backup.sql
 ```
 
-Or read the URL from the server:
+Or just `grep DATABASE_URL /opt/trade_bot/.env` on the server. Port is **5433** on the host.
+
+---
+
+## Docker / GHCR
+
+We don't use Docker Hub. Prod images are on GitHub (`ghcr.io/madhusahitya/gdsl-exchange-api` and `-web`).
+
+For your day-to-day work, just build locally — don't bother pulling prod images.
+
+If you're on the server over SSH, docker is already logged in. No extra credentials needed.
+
+If you really need to pull images on your laptop (you probably don't), ping me and I'll send a GitHub token with `read:packages`. Login like:
 
 ```bash
-grep DATABASE_URL /opt/trade_bot/.env
-# for pg_dump on the host, use 127.0.0.1:5433 instead of postgres:5432
+echo 'TOKEN' | docker login ghcr.io -u Madhusahitya --password-stdin
 ```
 
 ---
 
-## 3. API layout
+## Where the code is
 
+<<<<<<< HEAD
 | Path | Purpose |
 |------|---------|
 | `src/index.ts` | Thin boot |
@@ -88,11 +99,24 @@ grep DATABASE_URL /opt/trade_bot/.env
 | `src/routes/*.ts` | HTTP handlers |
 | `src/services/**` | Business logic |
 | `packages/db/prisma/schema.prisma` | Database schema |
+=======
+Main entry: `apps/api/src/index.ts`
+
+- `apps/api/src/server/socketServer.ts` — Socket.IO
+- `apps/api/src/server/registerRoutes.ts` — routes
+- `apps/api/src/lib/realtimeHub.ts` — `getSocketIo()` for emitting from routes
+- `apps/api/src/routes/` — HTTP handlers
+- `apps/api/src/services/` — business logic
+- `packages/db/prisma/schema.prisma` — DB schema
+
+Socket events in use: `trade:executed`, `trade:failed`, `performance:update`, `portfolio:update`, `cex-sm:trade`, `positions:refresh`.
+>>>>>>> 82f036891d50867fdf64816cede5a792b38e5e5c
 
 ---
 
-## 4. WebSockets — already exist
+## Deploy
 
+<<<<<<< HEAD
 Extend `src/server/socketServer.ts`. Emit from routes via `getSocketIo()` in `src/lib/realtimeHub.ts`.
 
 | Event | Direction |
@@ -124,3 +148,6 @@ Production:
 - API: [api.godslandx.com/health](https://api.godslandx.com/health)
 
 **SSL:** Let's Encrypt on the droplet (auto-renew). No separate SSL login — use HTTPS URLs above.
+=======
+Push to `main`. The `gdsl-exchange` repo's GitHub Action builds the image and deploys. Image: `ghcr.io/madhusahitya/gdsl-exchange-api:latest`.
+>>>>>>> 82f036891d50867fdf64816cede5a792b38e5e5c

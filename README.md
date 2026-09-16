@@ -2,7 +2,7 @@
 
 Standalone backend for **Godslandx / koie.fin** — Express REST API, Socket.IO, Prisma/Postgres, trading bots, Jupiter/Binance integrations.
 
-The frontend lives in a separate repo: [Madhusahitya/gdsl-exchange](https://github.com/Madhusahitya/gdsl-exchange) (web only).
+The frontend lives in a separate repo: [Madhusahitya/gdsl-exchange-web](https://github.com/Madhusahitya/gdsl-exchange-web).
 
 Production: [trade.godslandx.com](https://trade.godslandx.com)
 
@@ -14,14 +14,15 @@ cd gdsl-exchange-api
 cp .env.example .env          # edit DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY
 npm install
 npm run db:migrate
-npm run dev                     # http://localhost:4000/health
+npm run dev                     # http://localhost:8000/health (local dev)
 ```
 
-Or with Docker:
+Or with Docker (production-like, port **4000**):
 
 ```bash
 cp .env.example .env
-docker compose up --build
+# set PORT=4000 in .env for docker compose
+docker compose up --build      # http://localhost:4000/health
 ```
 
 ## Repo layout
@@ -45,4 +46,4 @@ Full handoff notes: [`docs/BACKEND_ENGINEER_HANDOFF.md`](docs/BACKEND_ENGINEER_H
 
 Push to `main` → GitHub Actions builds `ghcr.io/madhusahitya/gdsl-exchange-api:latest`.
 
-The production droplet pulls that image via the frontend repo's `docker-compose.yml`.
+The production droplet pulls that image via the [gdsl-exchange](https://github.com/Madhusahitya/gdsl-exchange) deploy repo's `docker-compose.yml`.
