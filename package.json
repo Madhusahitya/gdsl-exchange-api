@@ -28,7 +28,7 @@
     "@cryptoflow/bot": "*",
     "@cryptoflow/db": "*",
     "@cryptoflow/dex-pancake": "*",
-    "@prisma/client": "^6.3.1",
+    "@prisma/client": "^6.19.3",
     "@solana/spl-token": "^0.4.13",
     "@solana/web3.js": "^1.98.4",
     "bcryptjs": "^2.4.3",
@@ -47,7 +47,7 @@
     "rss-parser": "^3.13.0",
     "socket.io": "^4.8.1",
     "ws": "^8.18.0",
-    "zod": "^3.24.1"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

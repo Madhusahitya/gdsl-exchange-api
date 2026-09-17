@@ -30,8 +30,12 @@ RUN npm ci
 # Copy entire repository source code
 COPY . .
 
-# Generate Prisma Client & compile TypeScript workspace packages
-RUN npm run db:generate
+# Generate Prisma Client & compile TypeScript workspace packages.
+# Run the workspace's own prisma CLI from the repo root with an explicit schema:
+# `npm run db:generate` (cwd packages/db) can fail to resolve the hoisted
+# @prisma/client, and a bare `npx prisma` would download a mismatched major.
+RUN PRISMA_CLI="$(node -p "require.resolve('prisma/build/index.js', { paths: ['./packages/db', '.'] })")" \
+  && node "$PRISMA_CLI" generate --schema=packages/db/prisma/schema.prisma
 RUN npm run build:packages
 RUN npm run build
 
