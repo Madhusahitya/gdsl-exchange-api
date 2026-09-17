@@ -15,12 +15,14 @@ import { prisma } from '@cryptoflow/db'
 import { env } from '../lib/env'
 import { logger } from '../lib/logger'
 import { registerSocketIo } from '../lib/realtimeHub'
+import { pubsub } from '../lib/pubsub'
 import { isDevAuthBypassActive } from '../lib/devAuth'
 import { GLOBAL_PAPER_EMAIL } from '../services/bot/globalPaperTrader'
 import { liveTradingBot } from '../services/bot/liveTradingBot'
 import { advancedBot } from '../services/bot/advancedBot'
 import { telegramService } from '../services/notifications/telegramService'
 import { corsOriginHandler } from './cors'
+import { startJupiterLiveTicker } from '../services/dex/jupiterLiveTickerService'
 
 type JwtPayload = { userId: string }
 
@@ -236,6 +238,18 @@ export function createSocketServer(httpServer: HttpServer): Server {
   })
 
   wireBotEvents(io)
+
+  // Real-time market overview — reactive push (fires only on cache refresh, ~every 20s)
+  pubsub.subscribe('jupiter:overview', (payload) => {
+    io.emit('jupiter:overview', payload)
+  })
+
+  // Fast 2-second real-time price tick stream
+  pubsub.subscribe('jupiter:ticker', (ticks) => {
+    io.emit('jupiter:ticker', ticks)
+  })
+
+  startJupiterLiveTicker()
 
   setInterval(async () => {
     await Promise.all(

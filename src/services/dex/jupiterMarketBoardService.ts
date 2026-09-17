@@ -4,6 +4,7 @@
 import { getBinanceUsdtMarketBoard, type MarketBoardRow } from '../trading/binanceMarketBoard'
 import { fetchJupiterPricesV3Batched } from './jupiterPriceService'
 import { getJupiterTradableRegistry, isJupiterRegistryDiscovering } from './jupiterTradableRegistry'
+import { pubsub } from '../../lib/pubsub'
 
 export type JupiterMarketBoardRow = MarketBoardRow & {
   priceSource: 'jupiter_v3'
@@ -80,6 +81,27 @@ export async function getJupiterLiveMarketBoard(limit: number): Promise<{
   rows.sort((a, b) => b.quoteVolume - a.quoteVolume)
   const discovering = registry.discovering || isJupiterRegistryDiscovering()
   boardCache = { at: Date.now(), rows, tradableCount: registry.symbols.length, discovering }
+
+  // Broadcast to all connected sockets — only fires on actual cache refresh (~every 20s)
+  const hot = [...rows].sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 8)
+  const topGainers = [...rows]
+    .filter((r) => r.priceChangePercent > 0)
+    .sort((a, b) => b.priceChangePercent - a.priceChangePercent)
+    .slice(0, 8)
+  const topLosers = [...rows]
+    .filter((r) => r.priceChangePercent < 0)
+    .sort((a, b) => a.priceChangePercent - b.priceChangePercent)
+    .slice(0, 8)
+  pubsub.publish('jupiter:overview', {
+    rows: rows.slice(0, 1500),
+    updatedAt: new Date().toISOString(),
+    cached: false,
+    tradableCount: registry.symbols.length,
+    discovering,
+    highlights: { hot, topGainers, topLosers },
+    totalPairs: rows.length,
+  })
+
   return {
     rows: rows.slice(0, cap),
     updatedAt: new Date().toISOString(),
