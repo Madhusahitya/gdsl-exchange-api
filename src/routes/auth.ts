@@ -87,7 +87,12 @@ function signAccess(userId: string, email: string) {
 }
 
 function signRefresh(userId: string, email: string) {
-  return jwt.sign({ userId, email }, env.JWT_REFRESH_SECRET, { expiresIn: `${REFRESH_TTL_SECONDS}s` })
+  // `jti` makes every refresh token unique. Without it two refreshes for the same
+  // user in the same second produce identical JWTs → identical refreshTokenHash →
+  // AuthSession unique-constraint failure (409) → browser drops the session.
+  return jwt.sign({ userId, email, jti: randomBytes(16).toString('hex') }, env.JWT_REFRESH_SECRET, {
+    expiresIn: `${REFRESH_TTL_SECONDS}s`,
+  })
 }
 
 /** Secrets that may have signed refresh JWTs across deploys (explicit + legacy fallback). */
