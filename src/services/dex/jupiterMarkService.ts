@@ -30,26 +30,38 @@ const MARKS_STALE_MS = 60_000
 const binanceBookCache = new Map<string, { mid: number; ts: number }>()
 const BINANCE_BOOK_TTL_MS = 800
 
+const BINANCE_ENDPOINTS = [
+  'https://data-api.binance.vision',
+  'https://api3.binance.com',
+  'https://api1.binance.com',
+  'https://api.binance.com',
+]
+
 /** Fast CEX reference for majors (WBTC tracks BTCUSDT on Binance). */
 export async function fetchBinanceBookMid(binanceSymbol: string): Promise<number | null> {
   const sym = binanceSymbol.toUpperCase()
   const hit = binanceBookCache.get(sym)
   if (hit && Date.now() - hit.ts < BINANCE_BOOK_TTL_MS) return hit.mid
-  try {
-    const r = await fetch(`https://api.binance.com/api/v3/ticker/bookTicker?symbol=${encodeURIComponent(sym)}`, {
-      signal: AbortSignal.timeout(5_000),
-    })
-    if (!r.ok) return hit?.mid ?? null
-    const b = (await r.json()) as { bidPrice?: string; askPrice?: string }
-    const bid = parseFloat(String(b.bidPrice ?? ''))
-    const ask = parseFloat(String(b.askPrice ?? ''))
-    if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) return hit?.mid ?? null
-    const mid = (bid + ask) / 2
-    binanceBookCache.set(sym, { mid, ts: Date.now() })
-    return mid
-  } catch {
-    return hit?.mid ?? null
+
+  for (const base of BINANCE_ENDPOINTS) {
+    try {
+      const r = await fetch(`${base}/api/v3/ticker/bookTicker?symbol=${encodeURIComponent(sym)}`, {
+        signal: AbortSignal.timeout(3000),
+      })
+      if (!r.ok) continue
+      const b = (await r.json()) as { bidPrice?: string; askPrice?: string }
+      const bid = parseFloat(String(b.bidPrice ?? ''))
+      const ask = parseFloat(String(b.askPrice ?? ''))
+      if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
+        const mid = (bid + ask) / 2
+        binanceBookCache.set(sym, { mid, ts: Date.now() })
+        return mid
+      }
+    } catch {
+      // try next endpoint
+    }
   }
+  return hit?.mid ?? null
 }
 
 const DEFAULT_BUY_USD = 50

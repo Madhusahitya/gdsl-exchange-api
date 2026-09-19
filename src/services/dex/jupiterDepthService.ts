@@ -3,7 +3,7 @@
  */
 import { getJupiterTradableToken } from './jupiterTradableRegistry'
 import { getJupiterOrder, isJupiterConfigured } from './jupiterClassicService'
-import { getJupiterExecutableMarks } from './jupiterMarkService'
+import { getJupiterExecutableMarks, fetchBinanceBookMid } from './jupiterMarkService'
 import { SOL_USDC_MINT } from '../../lib/solDexCatalog'
 import { fetchJupiterPricesV3 } from './jupiterPriceService'
 
@@ -143,11 +143,49 @@ export async function getJupiterSyntheticDepth(
   }
 
   const token = await getJupiterTradableToken(sym)
-  const marks = await getJupiterExecutableMarks(sym)
-  if (!token || !marks) {
+  if (!token) {
     const empty: JupiterSyntheticDepth = {
       symbol: sym,
-      mint: token?.mint ?? null,
+      mint: null,
+      bids: [],
+      asks: [],
+      mid: null,
+      bid: null,
+      ask: null,
+      spreadBps: null,
+      updatedAt: new Date().toISOString(),
+      source: 'jupiter_quotes',
+    }
+    return empty
+  }
+
+  let marks = await getJupiterExecutableMarks(sym)
+  if (!marks) {
+    let refMid = await fetchBinanceBookMid(sym)
+    if (!refMid) {
+      const v3Map = await fetchJupiterPricesV3([token.mint])
+      refMid = v3Map.get(token.mint)?.usdPrice ?? null
+    }
+    if (refMid && refMid > 0) {
+      const spreadBps = 4
+      const half = (refMid * spreadBps) / 20_000
+      marks = {
+        baseSymbol: sym.replace(/USDT$/i, ''),
+        binanceSymbol: sym,
+        mint: token.mint,
+        bid: refMid - half,
+        ask: refMid + half,
+        mid: refMid,
+        spreadBps,
+        ts: Date.now(),
+      }
+    }
+  }
+
+  if (!marks) {
+    const empty: JupiterSyntheticDepth = {
+      symbol: sym,
+      mint: token.mint,
       bids: [],
       asks: [],
       mid: null,
@@ -161,68 +199,11 @@ export async function getJupiterSyntheticDepth(
   }
 
   let refQty = 0.01
-  try {
-    const prices = await fetchJupiterPricesV3([token.mint])
-    const v3 = prices.get(token.mint)?.usdPrice
-    if (v3 != null && v3 > 0) refQty = 50 / v3
-  } catch {
-    if (marks.mid != null && marks.mid > 0) refQty = 50 / marks.mid
+  if (marks.mid != null && marks.mid > 0) {
+    refQty = 50 / marks.mid
   }
 
-  const buyUsdSteps = [8, 15, 25, 40, 60, 90, 120, 160].slice(0, cap)
-  const sellQtySteps = buyUsdSteps.map((usd) => (marks.mid != null && marks.mid > 0 ? usd / marks.mid : refQty * 0.25))
-
-  const [askQuotes, bidQuotes] = await Promise.all([
-    Promise.all(buyUsdSteps.map((usd) => quoteBuyLevel(token.mint, token.decimals, usd))),
-    Promise.all(sellQtySteps.map((qty) => quoteSellLevel(token.mint, token.decimals, qty))),
-  ])
-
-  const asks: JupiterDepthLevel[] = []
-  const bids: JupiterDepthLevel[] = []
-
-  for (let i = 0; i < buyUsdSteps.length; i++) {
-    const row = askQuotes[i]
-    const usd = buyUsdSteps[i]!
-    if (row) asks.push({ price: row.price, qty: row.qty, notionalUsd: usd })
-  }
-  for (let i = 0; i < sellQtySteps.length; i++) {
-    const row = bidQuotes[i]
-    if (row) bids.push({ price: row.price, qty: row.qty, notionalUsd: row.price * row.qty })
-  }
-
-  if (asks.length === 0 && bids.length === 0) {
-    const fallback = buildLevelsFromMarks(marks, refQty, cap)
-    depthCache.set(sym, { at: Date.now(), depth: fallback })
-    return fallback
-  }
-
-  asks.sort((a, b) => a.price - b.price)
-  bids.sort((a, b) => b.price - a.price)
-
-  const bestAsk = asks[0]?.price ?? marks.ask
-  const bestBid = bids[0]?.price ?? marks.bid
-  const mid =
-    bestBid != null && bestAsk != null && bestBid > 0 && bestAsk > 0
-      ? (bestBid + bestAsk) / 2
-      : marks.mid
-  const spreadBps =
-    bestBid != null && bestAsk != null && bestAsk > 0
-      ? Math.round(((bestAsk - bestBid) / bestAsk) * 10_000)
-      : marks.spreadBps
-
-  const depth: JupiterSyntheticDepth = {
-    symbol: sym,
-    mint: token.mint,
-    bids: bids.slice(0, cap),
-    asks: asks.slice(0, cap),
-    mid,
-    bid: bestBid ?? marks.bid,
-    ask: bestAsk ?? marks.ask,
-    spreadBps,
-    updatedAt: new Date().toISOString(),
-    source: 'jupiter_quotes',
-  }
-
+  const depth = buildLevelsFromMarks(marks, refQty, cap)
   depthCache.set(sym, { at: Date.now(), depth })
   return depth
 }

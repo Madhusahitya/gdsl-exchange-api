@@ -35,25 +35,41 @@ export async function getUserBinanceConnection(userId: string) {
   })
 }
 
+const BINANCE_ENDPOINTS = [
+  'https://data-api.binance.vision',
+  'https://api3.binance.com',
+  'https://api1.binance.com',
+  'https://api.binance.com',
+]
+
 export async function fetchBookTicker(binanceSymbol: string): Promise<{
   bid: number
   ask: number
   mid: number
 } | null> {
-  try {
-    const r = await fetch(
-      `${BINANCE_PUBLIC}/api/v3/ticker/bookTicker?symbol=${encodeURIComponent(binanceSymbol)}`,
-      { signal: AbortSignal.timeout(6000) },
-    )
-    if (!r.ok) return null
-    const row = (await r.json()) as { bidPrice?: string; askPrice?: string }
-    const bid = parseFloat(row.bidPrice ?? 'NaN')
-    const ask = parseFloat(row.askPrice ?? 'NaN')
-    if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) return null
-    return { bid, ask, mid: (bid + ask) / 2 }
-  } catch {
-    return null
+  const sym = encodeURIComponent(binanceSymbol)
+  const endpoints = process.env.BINANCE_BASE_URL
+    ? [process.env.BINANCE_BASE_URL.replace(/\/$/, ''), ...BINANCE_ENDPOINTS]
+    : BINANCE_ENDPOINTS
+
+  for (const base of endpoints) {
+    try {
+      const r = await fetch(
+        `${base}/api/v3/ticker/bookTicker?symbol=${sym}`,
+        { signal: AbortSignal.timeout(4000) },
+      )
+      if (!r.ok) continue
+      const row = (await r.json()) as { bidPrice?: string; askPrice?: string }
+      const bid = parseFloat(row.bidPrice ?? 'NaN')
+      const ask = parseFloat(row.askPrice ?? 'NaN')
+      if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
+        return { bid, ask, mid: (bid + ask) / 2 }
+      }
+    } catch {
+      // try next endpoint
+    }
   }
+  return null
 }
 
 function baseAssetFromSymbol(binanceSymbol: string): string {

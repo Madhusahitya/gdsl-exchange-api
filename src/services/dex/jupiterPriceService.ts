@@ -86,10 +86,10 @@ async function fetchPricesFromJupiter(mints: string[]): Promise<void> {
     try {
       const res = await fetch(ep.url, {
         headers: ep.headers,
-        signal: AbortSignal.timeout(12_000),
+        signal: AbortSignal.timeout(3_000),
       })
       if (res.status === 429) {
-        rateLimitedUntil = Date.now() + 12_000
+        rateLimitedUntil = Date.now() + 5_000
         logger.warn(`[jupiterPrice] ${ep.label} rate limited (429)`)
         continue
       }

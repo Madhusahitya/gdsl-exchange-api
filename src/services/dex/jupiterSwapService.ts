@@ -580,8 +580,13 @@ export async function getJupiterOpenPositions(
   slippageBps = 100,
 ): Promise<JupiterOpenPosition[]> {
   if (!isJupiterConfigured()) return []
-  await reconcileStaleJupiterOpenTrades(userId).catch(() => 0)
   const strategyId = await ensureJupiterStrategyId()
+  const openCount = await prisma.trade.count({
+    where: { userId, strategyId, status: TradeStatus.OPEN },
+  })
+  if (openCount === 0) return []
+
+  await reconcileStaleJupiterOpenTrades(userId).catch(() => 0)
   const opens = await prisma.trade.findMany({
     where: { userId, strategyId, status: TradeStatus.OPEN },
     select: {

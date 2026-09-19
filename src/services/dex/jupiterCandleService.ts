@@ -102,21 +102,35 @@ async function fetchGeckoCandles(mint: string, interval: string, limit: number):
   return candles
 }
 
+const BINANCE_ENDPOINTS = [
+  'https://data-api.binance.vision',
+  'https://api3.binance.com',
+  'https://api1.binance.com',
+  'https://api.binance.com',
+]
+
 async function fetchBinanceCandles(sym: string, interval: string, cap: number): Promise<JupiterCandle[]> {
-  const url = `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${interval}&limit=${cap}`
-  const r = await fetch(url, { signal: AbortSignal.timeout(12_000) })
-  if (!r.ok) throw new Error(`Binance klines error ${r.status}`)
-  const raw = (await r.json()) as Array<Array<string | number>>
-  if (!Array.isArray(raw) || raw.length === 0) throw new Error('No candle data')
-  return raw.map((row) => ({
-    openTime: Number(row[0]),
-    open: parseFloat(String(row[1])),
-    high: parseFloat(String(row[2])),
-    low: parseFloat(String(row[3])),
-    close: parseFloat(String(row[4])),
-    volume: parseFloat(String(row[5])),
-    closeTime: Number(row[6]),
-  }))
+  for (const base of BINANCE_ENDPOINTS) {
+    try {
+      const url = `${base}/api/v3/klines?symbol=${sym}&interval=${interval}&limit=${cap}`
+      const r = await fetch(url, { signal: AbortSignal.timeout(4000) })
+      if (!r.ok) continue
+      const raw = (await r.json()) as Array<Array<string | number>>
+      if (!Array.isArray(raw) || raw.length === 0) continue
+      return raw.map((row) => ({
+        openTime: Number(row[0]),
+        open: parseFloat(String(row[1])),
+        high: parseFloat(String(row[2])),
+        low: parseFloat(String(row[3])),
+        close: parseFloat(String(row[4])),
+        volume: parseFloat(String(row[5])),
+        closeTime: Number(row[6]),
+      }))
+    } catch {
+      // try next endpoint
+    }
+  }
+  throw new Error('Binance klines unavailable across all endpoints')
 }
 
 export async function getJupiterAlignedCandles(

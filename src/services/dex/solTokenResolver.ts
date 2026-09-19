@@ -106,10 +106,10 @@ export async function resolveSolTokenForBinanceSymbol(
   const requireRoute = opts?.requireLiveRoute !== false
   const sym = binanceSymbol.toUpperCase()
   const catalog = catalogSolTokenForBinanceSymbol(sym)
-  if (catalog && (!requireRoute || (await jupiterBuyRouteOk(catalog.mint)))) {
+  if (catalog) {
     return { ...catalog, source: 'catalog' }
   }
-  if (!isJupiterConfigured()) return catalog ? { ...catalog, source: 'catalog' } : null
+  if (!isJupiterConfigured()) return null
   const base = sym.replace(/USDT$/i, '')
   const searched = await searchJupiterMint(base)
   if (searched && (!requireRoute || (await jupiterBuyRouteOk(searched.mint)))) return searched

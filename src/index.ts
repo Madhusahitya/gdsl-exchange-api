@@ -7,6 +7,9 @@ loadDotenv()
 loadDotenv({ path: resolvePath(__dirname, '..', '.env') })
 loadDotenv({ path: resolvePath(__dirname, '..', '..', '..', '.env') })
 
+import { initNetworkFix } from './lib/dnsFix'
+initNetworkFix()
+
 import { createServer } from 'http'
 import { env } from './lib/env'
 import { logger } from './lib/logger'
@@ -29,3 +32,6 @@ httpServer.listen(env.PORT, () => {
   logger.info(`API running on http://localhost:${env.PORT}`)
   void onServerListening()
 })
+// tsx-reload-dex
+
+

@@ -161,7 +161,7 @@ export async function getManualDesk(userId: string, rawSymbol: string): Promise<
   const symbol = resolved.symbol
   const pair = resolved.pair
 
-  const [readiness, book, rules, snapshot, tech, exits, smRow] = await Promise.all([
+  const [readiness, rawBook, rules, snapshot, tech, exits, smRow] = await Promise.all([
     computeAutomationReadiness(userId, connectionId ?? undefined),
     fetchBookTicker(symbol).catch(() => null),
     tryGetBinanceSymbolRules(symbol),
@@ -170,6 +170,18 @@ export async function getManualDesk(userId: string, rawSymbol: string): Promise<
     getCexExitSettings(userId),
     prisma.cexSuperMachineConfig.findUnique({ where: { userId } }),
   ])
+
+  let book = rawBook
+  if (!book) {
+    const depth = await orderBookService.getDepth(symbol).catch(() => null)
+    if (depth && depth.bids[0] && depth.asks[0]) {
+      book = {
+        bid: depth.bids[0].price,
+        ask: depth.asks[0].price,
+        mid: depth.mid ?? (depth.bids[0].price + depth.asks[0].price) / 2,
+      }
+    }
+  }
 
   const mid = book?.mid ?? snapshot?.market.lastPrice ?? null
   const spreadBps =
