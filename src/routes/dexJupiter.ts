@@ -311,7 +311,23 @@ router.get(
       await reconcileStaleJupiterOpenTrades(req.user!.userId).catch(() => 0)
       res.json(await getSolanaWalletDashboardSummary(req.user!.userId))
     } catch (err) {
-      res.status(502).json({ error: err instanceof Error ? err.message : 'Wallet summary failed' })
+      const msg = err instanceof Error ? err.message : 'Wallet summary failed'
+      // Graceful fallback: return wallet status & last known value so frontend dashboard does not crash with 502
+      const status = await getSolanaWalletStatus(req.user!.userId).catch(() => null)
+      if (status?.wallet) {
+        res.json({
+          address: status.wallet.address,
+          sol: 0,
+          usdc: 0,
+          totalUsd: Number((status.wallet as any).lastUsdValue ?? 0),
+          tokens: [],
+          supportedAssets: SOLANA_WITHDRAW_ASSETS,
+          rpcDegraded: true,
+          warning: msg,
+        })
+        return
+      }
+      res.status(502).json({ error: msg })
     }
   }),
 )

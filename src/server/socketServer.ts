@@ -239,6 +239,24 @@ export function createSocketServer(httpServer: HttpServer): Server {
 
   wireBotEvents(io)
 
+  // Attach Redis adapter for horizontal scaling when Redis is available
+  void (async () => {
+    try {
+      const { createAdapter } = await import('@socket.io/redis-adapter')
+      const { getRedisClient, createRedisDuplicate } = await import('../lib/redis')
+      const pubClient = await getRedisClient()
+      if (pubClient) {
+        const subClient = await createRedisDuplicate()
+        if (subClient) {
+          io.adapter(createAdapter(pubClient, subClient))
+          logger.info('[socket] Redis adapter active — multi-instance clustering enabled')
+        }
+      }
+    } catch {
+      logger.info('[socket] Running with standalone in-memory socket adapter')
+    }
+  })()
+
   // Real-time market overview — reactive push (fires only on cache refresh, ~every 20s)
   pubsub.subscribe('jupiter:overview', (payload) => {
     io.emit('jupiter:overview', payload)
@@ -249,19 +267,22 @@ export function createSocketServer(httpServer: HttpServer): Server {
     io.emit('jupiter:ticker', ticks)
   })
 
-  startJupiterLiveTicker()
+  // Cross-service event bridge (trading engine -> socket server)
+  pubsub.subscribe('portfolio:update', (data: { userId?: string }) => {
+    if (data?.userId) {
+      void emitPortfolioUpdate(io, data.userId)
+    }
+  })
 
-  setInterval(async () => {
-    await Promise.all(
-      Array.from(connectedSocketCounts.keys()).map(async (userId) => {
-        try {
-          await emitPortfolioUpdate(io, userId)
-        } catch {
-          /* ignore transient failures */
-        }
-      }),
-    )
-  }, 12_000)
+  pubsub.subscribe('trade:broadcast', (data: { userId: string; trade: unknown; currentPnl: number }) => {
+    if (data?.userId) {
+      io.to(`user:${data.userId}`).emit('trade:executed', { trade: data.trade, currentPnl: data.currentPnl })
+      io.to(`user:${data.userId}`).emit('performance:update')
+      void emitPortfolioUpdate(io, data.userId)
+    }
+  })
+
+  startJupiterLiveTicker()
 
   return io
 }

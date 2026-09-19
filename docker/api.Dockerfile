@@ -1,9 +1,5 @@
-# gdsl-exchange-api — production image (standalone repo)
-FROM node:20-bookworm-slim AS builder
-RUN apt-get update && apt-get install -y openssl ca-certificates python3 make g++ \
-  && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-
+# gdsl-exchange-api — production & local Docker image
+FROM node:22-bookworm-slim AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
@@ -11,41 +7,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
-COPY package*.json ./
-COPY packages/db/package*.json ./packages/db/
-COPY packages/binance-executor/package*.json ./packages/binance-executor/
-COPY packages/dex-pancake/package*.json ./packages/dex-pancake/
-COPY packages/bot/package*.json ./packages/bot/
-
-RUN npm ci
-
+# Copy all source files (excluding node_modules via .dockerignore)
 COPY . .
 
-RUN npm run db:generate
+# Use npm install for robust cross-platform workspace linking
+RUN npm install
+
+# Generate Prisma client and share across root and packages/db workspaces
+RUN npx prisma generate --schema=packages/db/prisma/schema.prisma
+RUN mkdir -p packages/db/node_modules && cp -r node_modules/.prisma packages/db/node_modules/ && cp -r node_modules/@prisma packages/db/node_modules/
+
+# Compile workspace packages and TypeScript API servers
 RUN npm run build:packages
 RUN npm run build
 RUN npm prune --omit=dev
 
-FROM node:20-slim AS runner
-
-WORKDIR /app
-RUN npm run build --workspace=@cryptoflow/db
-RUN npm run build --workspace=@cryptoflow/dex-pancake
-RUN npm run build --workspace=@cryptoflow/bot
-RUN npm run build --workspace=@cryptoflow/binance-executor
-RUN npm run build --workspace=apps/api
-
-FROM node:20-bookworm-slim AS runner
+FROM node:22-bookworm-slim AS runner
 RUN apt-get update && apt-get install -y openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
+
 COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/apps ./apps
 COPY --from=builder /app/packages ./packages
-COPY docker/api-entry.sh /app/api-entry.sh
-RUN chmod +x /app/api-entry.sh
-EXPOSE 4000
-CMD ["/app/api-entry.sh"]
+COPY --from=builder /app/dist ./dist
+
+EXPOSE 8000 8001
+CMD ["node", "dist/index.js"]

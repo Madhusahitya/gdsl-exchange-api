@@ -116,6 +116,12 @@ const envSchema = z.object({
   SMART_ROUTER_BINANCE_TAKER_FEE_BPS: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().optional()),
   SMART_ROUTER_DEX_GAS_USD_BUY: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().optional()),
   SMART_ROUTER_DEX_GAS_USD_SELL: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().optional()),
+  /** Redis connection URL (e.g. redis://127.0.0.1:6379). Enables distributed Pub/Sub, caching & Socket.IO adapter. */
+  REDIS_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
+  /** Dedicated Socket.IO port when running decoupled socket gateway (default: 8001). */
+  SOCKET_PORT: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().default(8001)),
+  /** Run all background services, watchers, and sockets inside one process (legacy dev mode). */
+  ALL_IN_ONE: z.preprocess((v) => parseBoolean(String(v ?? ''), false), z.boolean()).default(false),
 })
 
 function checkBinanceKeys() {

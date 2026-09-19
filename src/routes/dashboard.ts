@@ -16,6 +16,7 @@ import {
   getPersonalWalletSummaryForDashboard,
   isPersonalWalletEnabled,
 } from '../services/wallet/personalWalletService'
+import { cacheGet, cacheSet } from '../lib/redis'
 
 const router = Router()
 
@@ -63,6 +64,18 @@ type DashboardLastTrade = {
 
 router.get('/summary', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user!.userId
+  const browserSnap = parseBrowserWalletQuery(req.query)
+  const isBrowserQuery = Boolean(browserSnap)
+  const cacheKey = `dashboard:summary:${userId}`
+
+  if (!isBrowserQuery) {
+    const cached = await cacheGet<Record<string, unknown>>(cacheKey)
+    if (cached) {
+      res.json(cached)
+      return
+    }
+  }
+
   const now = new Date()
   const dayStart = startOfUtcDay(now)
   const weekStart = new Date(dayStart.getTime() - 6 * 24 * 60 * 60 * 1000)
@@ -195,8 +208,6 @@ router.get('/summary', authenticateToken, asyncHandler(async (req: Request, res:
     : 0
   const hashRate = activeSession ? Math.min(99, 5 + sessionAgeMinutes / 10 + today.tradeCount * 1.5) : 0
 
-  const browserSnap = parseBrowserWalletQuery(req.query)
-
   // Prefer browser-wallet snapshot when client sends it (user trades via MetaMask).
   // Otherwise prefer Personal Wallet API totals when enabled; fall back to ledger equity.
   const hasLivePersonalWallet = Boolean(personalWalletSummary?.enabled)
@@ -259,7 +270,7 @@ router.get('/summary', authenticateToken, asyncHandler(async (req: Request, res:
 
   const openPositionsOut: OpenPositionSnapshot[] = useBrowserLive ? [] : equity.positions
 
-  res.json({
+  const summaryPayload = {
     email: user.email,
     referralCode: user.referralCode,
 
@@ -358,8 +369,14 @@ router.get('/summary', authenticateToken, asyncHandler(async (req: Request, res:
       enabled: env.dexServerAutoExit && isPersonalWalletEnabled(),
       takeProfitPct: env.dexAutoTakeProfitPct,
       stopLossPct: env.dexAutoStopLossPct,
-        },
-  })
+    },
+  }
+
+  if (!isBrowserQuery && degraded.length === 0) {
+    void cacheSet(cacheKey, summaryPayload, 8)
+  }
+
+  res.json(summaryPayload)
 }))
 
 export default router

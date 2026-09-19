@@ -23,7 +23,7 @@ export async function appendTradingLog(
       userId,
       kind,
       message,
-      metadata: metadata !== undefined ? (metadata as Prisma.InputJsonValue) : undefined,
+      metadata: metadata !== undefined ? (metadata as any) : undefined,
     },
   })
 }
