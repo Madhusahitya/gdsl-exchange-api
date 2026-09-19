@@ -159,7 +159,28 @@ npm run benchmark
 
 ---
 
-## 4. Real-time Events & WebSockets
+## 4. Interactive API Documentation (Swagger / OpenAPI 3.0)
+
+The backend exposes an interactive **Swagger UI** and **OpenAPI 3.0** specification for testing endpoints, exploring schemas, and generating client libraries.
+
+### Accessing Swagger UI
+- **Local Dev UI:** [http://localhost:8000/docs](http://localhost:8000/docs) (also mirrored at `/api/docs`)
+- **Raw OpenAPI JSON:** [http://localhost:8000/docs.json](http://localhost:8000/docs.json) (or `/api/docs.json`)
+- **Production UI:** `https://api.godslandx.com/docs`
+
+### Testing Authenticated Routes
+1. Make a `POST /api/auth/login` request with your credentials (or test via the UI).
+2. Copy the returned `token`.
+3. Click the green **Authorize** button at the top right of the Swagger UI.
+4. Enter `Bearer <your_token>` and click **Authorize**.
+5. All authenticated requests (Dashboard, DEX Swaps, Bot status, Orders) will now automatically include the Bearer token in their headers.
+
+### Postman / Client Generation
+You can import `http://localhost:8000/docs.json` directly into **Postman** (`Import -> Link`) or tools like `openapi-typescript` to auto-generate fully typed TypeScript API clients.
+
+---
+
+## 5. Real-time Events & WebSockets
 
 WebSockets are handled via [`src/server/socketServer.ts`](file:///d:/faiz-p/gdsl-exchange-api/src/server/socketServer.ts) and backed by [`src/lib/pubsub.ts`](file:///d:/faiz-p/gdsl-exchange-api/src/lib/pubsub.ts).  
 All events are pushed reactively via Redis Pub/Sub; **there is no database polling loop bombing the database**.
@@ -189,7 +210,7 @@ getSocketIo()?.to(`user:${userId}`).emit('trade:executed', tradeData)
 
 ---
 
-## 5. Production Server & Deployment
+## 6. Production Server & Deployment
 
 ### Production Droplet Details
 
@@ -229,7 +250,7 @@ pg_dump 'postgresql://postgres:PASSWORD@127.0.0.1:5433/cryptoflow' --no-owner --
 
 ---
 
-## 6. Recommended Nginx Reverse Proxy Configuration
+## 7. Recommended Nginx Reverse Proxy Configuration
 
 On the production droplet (`157.245.100.175`), Nginx routes HTTP REST traffic to Port 8000 and WebSocket connections to Port 8001:
 
@@ -270,7 +291,7 @@ server {
 
 ---
 
-## 7. Key Code Locations
+## 8. Key Code Locations
 
 ```
 gdsl-exchange-api/
@@ -280,6 +301,9 @@ gdsl-exchange-api/
 │   ├── socket.ts                   # Service 2: Realtime Socket Gateway
 │   ├── tradingEngine.ts            # Service 3: Automated Trading Engine & Watchers
 │   ├── worker.ts                   # Service 4: Async Background Workers & Feed Ingestion
+│   │
+│   ├── docs/
+│   │   └── swaggerSpec.ts          # OpenAPI 3.0 specification & schema models
 │   │
 │   ├── lib/
 │   │   ├── redis.ts                # Redis connection, pool, and cache helpers (cacheGet/Set)
@@ -294,7 +318,7 @@ gdsl-exchange-api/
 │   │   └── ...
 │   │
 │   ├── server/
-│   │   ├── createApp.ts            # Express configuration, middleware, rate limiting
+│   │   ├── createApp.ts            # Express configuration, middleware, Swagger mount
 │   │   ├── registerRoutes.ts       # All /api/* route mounts
 │   │   └── socketServer.ts         # Socket.IO connection handling & Redis adapter
 │   │
@@ -319,7 +343,7 @@ gdsl-exchange-api/
 
 ---
 
-## 8. Safety & Guardrails
+## 9. Safety & Guardrails
 
 1. **Hot Wallet Safety:** Never log or expose raw private keys or seed phrases in logs or HTTP responses. Keep `ENCRYPTION_KEY` and `WALLET_ENCRYPTION_KEY` strictly secret.
 2. **Never commit `.env`:** Ensure `.env` remains in `.gitignore`.

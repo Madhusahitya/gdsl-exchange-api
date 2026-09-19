@@ -10,6 +10,8 @@ import { corsOriginHandler } from './cors'
 import { csrfProtection } from './csrf'
 import { httpRequestDuration, metricsRegistry } from './metrics'
 import { registerRoutes } from './registerRoutes'
+import swaggerUi from 'swagger-ui-express'
+import { swaggerSpec } from '../docs/swaggerSpec'
 
 /** Build the Express app — middleware, health checks, and HTTP routes. */
 export function createApp(): express.Application {
@@ -23,11 +25,11 @@ export function createApp(): express.Application {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", 'data:', 'https:'],
           connectSrc: ["'self'", env.FRONTEND_URL ?? 'http://localhost:3000', 'wss:', 'ws:', ...env.allowedCorsOrigins],
-          fontSrc: ["'self'"],
+          fontSrc: ["'self'", 'https:', 'data:'],
           objectSrc: ["'none'"],
           frameAncestors: ["'none'"],
         },
@@ -70,7 +72,23 @@ export function createApp(): express.Application {
   app.use('/api/engine/stop', botLimiter)
 
   app.get('/', (_req, res) => {
-    res.json({ name: 'CryptoFlow API', version: '1.0.0' })
+    res.json({ name: 'CryptoFlow API', version: '1.0.0', docs: '/docs' })
+  })
+
+  // Swagger / OpenAPI 3.0 Interactive Documentation
+  const swaggerUiOptions = {
+    customSiteTitle: 'Godslandx Trading API Documentation',
+    customCss: '.swagger-ui .topbar { display: none }',
+  }
+  app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions))
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions))
+  app.get('/docs.json', (_req, res) => {
+    res.setHeader('Content-Type', 'application/json')
+    res.json(swaggerSpec)
+  })
+  app.get('/api/docs.json', (_req, res) => {
+    res.setHeader('Content-Type', 'application/json')
+    res.json(swaggerSpec)
   })
 
   app.get('/health', async (_req, res) => {
