@@ -4,11 +4,20 @@ import { env } from '../lib/env'
 /** In development, skip strict login/register limits so local testing is not blocked after a few tries. */
 const skipAuthLimitInDev = (): boolean => env.NODE_ENV === 'development'
 
+/**
+ * Login/register brute-force cap per IP. Only FAILED attempts count — a
+ * successful login must never push a user into the 429 window (previously a
+ * few typos followed by the right password still locked the IP for 15 min).
+ * `AUTH_RATE_LIMIT_MAX` lets staging use a looser cap than production.
+ */
+const authLimitMax = Number(process.env.AUTH_RATE_LIMIT_MAX) > 0 ? Number(process.env.AUTH_RATE_LIMIT_MAX) : 5
+
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: authLimitMax,
   standardHeaders: true,
   legacyHeaders: false,
+  skipSuccessfulRequests: true,
   message: { error: 'Too many attempts, please try again later' },
   skip: skipAuthLimitInDev,
 })
