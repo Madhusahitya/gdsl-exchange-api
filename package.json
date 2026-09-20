@@ -27,7 +27,7 @@
     "lint": "eslint src packages --max-warnings 0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.19.0"
   },
   "dependencies": {
     "@cryptoflow/binance-executor": "*",

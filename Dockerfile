@@ -4,7 +4,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Stage 1: Build & Compile
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 
 WORKDIR /app
 
@@ -40,7 +40,7 @@ RUN npm prune --omit=dev
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Production Runtime
-FROM node:20-slim AS runner
+FROM node:22-slim AS runner
 
 WORKDIR /app
 
