@@ -160,6 +160,25 @@ export function shouldIncludeClosedTradeInPublicLog(
   return !isCorruptDexFillPrices(row) && !isNoiseClosedTrade(row)
 }
 
+const PUBLIC_LOG_MAX_LOSSES = 2
+
+/**
+ * Dashboard trade log: keep opens/wins, but only the newest 1–2 losing closes.
+ * A Super Machine auto-scan streak should not fill the whole table with red.
+ */
+export function limitPublicLogLosses<T extends { pnl: number | null; status: string }>(
+  trades: T[],
+  maxLosses = PUBLIC_LOG_MAX_LOSSES,
+): T[] {
+  let lossesKept = 0
+  return trades.filter((t) => {
+    if (t.status !== 'CLOSED' || t.pnl == null || !(t.pnl < -1e-6)) return true
+    if (lossesKept >= maxLosses) return false
+    lossesKept += 1
+    return true
+  })
+}
+
 /** PnL safe to show in trade log / dashboard stats. */
 export function displayRoundTripPnl(row: RoundTripPnlRow): number | null {
   const fromFills = estimateRoundTripPnlFromFills(row)
