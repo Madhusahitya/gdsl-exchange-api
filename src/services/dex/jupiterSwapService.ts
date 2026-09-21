@@ -683,12 +683,7 @@ export async function getJupiterOpenPositions(
         }
       }
 
-      const inProfit =
-        liveSellPrice != null &&
-        breakEvenSellPrice != null &&
-        liveSellPrice >= breakEvenSellPrice &&
-        estNetPnlUsd != null &&
-        estNetPnlUsd >= env.dexMinNetProfitUsd
+      const inProfit = liveSellPrice != null && liveSellPrice > avgEntry
 
       return {
         baseSymbol: base,
@@ -1818,7 +1813,7 @@ export async function skimJupiterPositionProfit(
   }
 
   const pct = ((exitMark - entry) / entry) * 100
-  if (pct <= 0.05) {
+  if (pct <= 0) {
     throw new Error(`${sym} is not in profit yet (${pct.toFixed(2)}% vs entry) — nothing to skim`)
   }
 
@@ -1826,6 +1821,7 @@ export async function skimJupiterPositionProfit(
   if (!token) throw new Error(`Unsupported symbol ${sym} on Jupiter Solana`)
 
   // Sell only the profit slice, capped at half the lot so the position keeps running.
+  // No platform fee and no $0.02 minimum — skim is a sell of tokens already held.
   const profitUsd = buyAlloc * (pct / 100)
   const factor = 10 ** Math.min(token.decimals, 8)
   let skimQty = Math.min(lotQty * 0.5, profitUsd / exitMark)
@@ -1835,23 +1831,14 @@ export async function skimJupiterPositionProfit(
   if (walletQty > 0) skimQty = Math.min(skimQty, walletQty * 0.98)
   skimQty = Math.floor(skimQty * factor) / factor
 
-  if (skimQty <= 0 || skimQty >= lotQty * 0.9) {
+  if (skimQty <= 0) {
     throw new Error('Profit slice is too small to skim on-chain — let it run a bit more')
   }
-
-  // Net-of-fees guard: the skimmed slice must clear Solana round-trip costs.
-  const skimSliceNet = estimatedNetRoundTripUsd(
-    buyAlloc * (skimQty / lotQty),
-    entry,
-    exitMark,
-    env.dexAutoExitSlippageBps,
-    SOLANA_DEX_ROUND_TRIP_FEE_USD,
-  )
-  const minNetUsd = Math.min(env.dexMinNetProfitUsd, 0.02)
-  if (skimSliceNet < minNetUsd) {
-    throw new Error(
-      `Skim would net ~$${skimSliceNet.toFixed(3)} after fees — below the $${minNetUsd.toFixed(2)} minimum`,
-    )
+  if (skimQty >= lotQty * 0.9) {
+    skimQty = Math.floor(lotQty * 0.5 * factor) / factor
+  }
+  if (skimQty <= 0) {
+    throw new Error('Profit slice is too small to skim on-chain — let it run a bit more')
   }
 
   const result = await executeJupiterSwap(

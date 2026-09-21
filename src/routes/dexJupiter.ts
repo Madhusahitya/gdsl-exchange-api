@@ -1048,6 +1048,7 @@ router.delete(
 router.get(
   '/super-machine/settings',
   asyncHandler(async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store')
     res.json(await getSuperMachineSettings(req.user!.userId))
   }),
 )

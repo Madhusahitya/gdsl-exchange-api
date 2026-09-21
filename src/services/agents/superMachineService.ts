@@ -289,7 +289,8 @@ export async function setSuperMachineSettings(
   }
 
   // Auto-scan sizes from wallet USDC — not a fixed $10 cap.
-  if (!next.watchSymbol) {
+  // Skip on disable so turning the machine off is instant and cannot hang the toggle.
+  if (next.enabled && !next.watchSymbol) {
     try {
       const bal = await getSolanaBalances(userId)
       next.maxTradeUsd = walletMaxTradeUsd(bal.usdc)
