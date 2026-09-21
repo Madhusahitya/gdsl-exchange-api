@@ -1299,6 +1299,12 @@ router.post(
         source: 'dex-jupiter-manual-skim',
         reason: 'profit_skim',
         ...result,
+        trade: {
+          ...result.trade,
+          signal: 'SELL',
+          pair: result.trade.pair,
+          price: result.trade.exitPrice ?? result.trade.entryPrice,
+        },
       })
       void telegramService
         .notifyDexBotTrade({

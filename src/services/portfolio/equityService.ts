@@ -30,7 +30,7 @@ import {
 } from '@cryptoflow/db'
 import { BSC_TOKEN_BINANCE_BY_SYMBOL } from '../../lib/bscTokenCatalog'
 import { SOL_TOKEN_BINANCE_BY_SYMBOL } from '../../lib/solDexCatalog'
-import { displayNetRoundTripPnl, shouldIncludeClosedTradeInPublicLog } from '../../lib/roundTripPnl'
+import { displayRoundTripPnl, shouldIncludeClosedTradeInPublicLog } from '../../lib/roundTripPnl'
 import { logger } from '../../lib/logger'
 import { quoteOneInchSellUsdPerToken } from '../dex/oneInchMarkService'
 import { quoteJupiterSellUsdPerToken } from '../dex/jupiterMarkService'
@@ -259,7 +259,7 @@ export async function computeUserEquity(userId: string): Promise<EquitySnapshot>
       strategyName: t.strategy.name,
     }
     if (!shouldIncludeClosedTradeInPublicLog(row)) return acc
-    const pnl = displayNetRoundTripPnl(row)
+    const pnl = displayRoundTripPnl(row)
     return acc + (pnl ?? 0)
   }, 0)
   const realizedEquity = totalDeposits - totalWithdrawals + realizedPnlAllTime
@@ -488,7 +488,7 @@ export async function summarizeLedgerWindow(
       strategyName: t.strategy.name,
     }
     if (!shouldIncludeClosedTradeInPublicLog(row)) continue
-    const pnl = displayNetRoundTripPnl(row)
+    const pnl = displayRoundTripPnl(row)
     if (pnl == null) continue
     tradeCount += 1
     realizedPnl += pnl

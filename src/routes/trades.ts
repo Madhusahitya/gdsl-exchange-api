@@ -107,7 +107,8 @@ router.get('/', authenticateToken, validate(tradesQuerySchema), asyncHandler(asy
     pair: trade.pair,
     entryPrice: Number(trade.entryPrice),
     exitPrice,
-    pnl: netPnl ?? grossPnl,
+    // Fill PnL only — do not subtract estimated gas or every close looks −$0.015.
+    pnl: grossPnl,
     grossPnl,
     netPnl,
     allocationUsd: trade.allocationUsd != null ? Number(trade.allocationUsd) : null,
