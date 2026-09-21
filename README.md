@@ -29,16 +29,16 @@ docker compose up --build      # http://localhost:4000/health
 
 | Path | Purpose |
 |------|---------|
-| `apps/api/src/index.ts` | Boot — HTTP server + Socket.IO |
-| `apps/api/src/server/` | Express app, routes mount, **socketServer.ts**, background jobs |
-| `apps/api/src/routes/` | HTTP handlers (one file per domain) |
-| `apps/api/src/services/` | Business logic |
+| `src/index.ts` | Boot — HTTP server + Socket.IO |
+| `src/server/` | Express app, routes mount, **socketServer.ts**, background jobs |
+| `src/routes/` | HTTP handlers (one file per domain) |
+| `src/services/` | Business logic |
 | `packages/db/` | Prisma schema + migrations |
 | `packages/bot/` | Paper/live bot engine |
 | `packages/binance-executor/` | Binance REST executor |
 | `packages/dex-pancake/` | BSC/PancakeSwap ABIs |
 
-**WebSockets:** extend `apps/api/src/server/socketServer.ts` — Socket.IO is already wired.
+**WebSockets:** extend `src/server/socketServer.ts` — Socket.IO is already wired.
 
 Full handoff notes: [`docs/BACKEND_ENGINEER_HANDOFF.md`](docs/BACKEND_ENGINEER_HANDOFF.md)
 

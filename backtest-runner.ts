@@ -10,7 +10,7 @@ import 'dotenv/config'
 import { prisma } from '@cryptoflow/db'
 import {
   ema, rsi, macd, bollinger, atr, obv, stochastic, linRegSlope, last,
-} from '../apps/api/src/services/market/indicators'
+} from './src/services/market/indicators'
 import { computeMetrics } from './metrics'
 
 const args = process.argv.slice(2)

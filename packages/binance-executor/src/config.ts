@@ -5,7 +5,6 @@ import fs from 'fs'
 function tryLoadEnvFiles(): void {
   const roots = [
     process.cwd(),
-    path.resolve(process.cwd(), 'apps/api'),
     path.resolve(process.cwd(), '..'),
   ]
   const names = ['.env', '.env.local']

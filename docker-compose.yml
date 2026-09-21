@@ -1,11 +1,12 @@
-# Local API + Postgres (standalone backend repo)
-#   cp .env.example .env && docker compose up --build
+# 4-Service Decoupled Architecture (Production & Local Docker)
 services:
+  # Optional local Postgres container (uses port 5433 on host to avoid colliding with local 5432)
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-root}
       POSTGRES_DB: ${POSTGRES_DB:-cryptoflow}
     volumes:
       - cryptoflow_pg:/var/lib/postgresql/data
@@ -17,22 +18,102 @@ services:
       timeout: 5s
       retries: 8
 
+  # Redis container for Pub/Sub, Caching & Sockets
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - cryptoflow_redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Service 1: Stateless Core HTTP REST API
   api:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
+    command: ["node", "dist/server.js"]
     ports:
-      - '4000:4000'
+      - '8000:8000'
     env_file:
       - .env
     environment:
       NODE_ENV: production
-      PORT: 4000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cryptoflow}
+      PORT: 8000
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
-      postgres:
+      redis:
+        condition: service_healthy
+
+  # Service 2: Realtime Socket.IO Gateway (With Redis Adapter)
+  socket:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    restart: unless-stopped
+    command: ["node", "dist/socket.js"]
+    ports:
+      - '8001:8001'
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      SOCKET_PORT: 8001
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Service 3: Automated Trading Engine & Position Watchers
+  trading-engine:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    restart: unless-stopped
+    command: ["node", "dist/tradingEngine.js"]
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Service 4: Async Workers & Market Data Ingestion
+  worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
         condition: service_healthy
 
 volumes:
   cryptoflow_pg:
+  cryptoflow_redis:

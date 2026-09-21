@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gdsl-exchange-api-db-migration
+  namespace: default
+  labels:
+    app.kubernetes.io/name: gdsl-exchange-api
+    app.kubernetes.io/component: db-migration
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gdsl-exchange-api
+        app.kubernetes.io/component: db-migration
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: prisma-migrate
+          image: gdsl-exchange-api:latest
+          imagePullPolicy: IfNotPresent
+          command: ["npx", "prisma", "migrate", "deploy"]
+          workingDir: /app/packages/db
+          envFrom:
+            - configMapRef:
+                name: gdsl-exchange-api-config
+            - secretRef:
+                name: gdsl-exchange-api-secret
