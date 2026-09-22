@@ -1048,6 +1048,7 @@ router.delete(
 router.get(
   '/super-machine/settings',
   asyncHandler(async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store')
     res.json(await getSuperMachineSettings(req.user!.userId))
   }),
 )
@@ -1298,6 +1299,12 @@ router.post(
         source: 'dex-jupiter-manual-skim',
         reason: 'profit_skim',
         ...result,
+        trade: {
+          ...result.trade,
+          signal: 'SELL',
+          pair: result.trade.pair,
+          price: result.trade.exitPrice ?? result.trade.entryPrice,
+        },
       })
       void telegramService
         .notifyDexBotTrade({

@@ -138,7 +138,6 @@ export async function runJupiterOpenPositionWatcher(): Promise<void> {
         env.dexAutoExitSlippageBps,
         SOLANA_DEX_ROUND_TRIP_FEE_USD,
       )
-      const minNetUsd = Math.min(env.dexMinNetProfitUsd, 0.02)
 
       // Telegram milestone / digest updates (throttled inside the service).
       trackJupiterOpenPosition(t.id, {
@@ -173,32 +172,21 @@ export async function runJupiterOpenPositionWatcher(): Promise<void> {
       let partialSkim = false
 
       if (pct >= tp && prefs.profitSkim) {
+        // Skim the profit slice and keep the lot open. Never fall through to a
+        // full close just because the slice is small — that's what "Sell now" is for.
         const lastSkim = skimCooldown.get(t.id) ?? 0
-        if (Date.now() - lastSkim >= SKIM_COOLDOWN_MS && estNetUsd >= minNetUsd) {
+        if (Date.now() - lastSkim >= SKIM_COOLDOWN_MS) {
           const token = await getJupiterTradableToken(`${baseSymbol}USDT`)
           const factor = 10 ** Math.min(token?.decimals ?? 6, 8)
           const profitUsd = buyAlloc * (pct / 100)
           const skimQty = Math.min(lotQty * 0.4, profitUsd / exitMark)
           sellQty = Math.floor(skimQty * factor) / factor
           if (sellQty > 0 && sellQty < lotQty * 0.9) {
-            const skimSliceNet = estimatedNetRoundTripUsd(
-              buyAlloc * (sellQty / lotQty),
-              entry,
-              exitMark,
-              env.dexAutoExitSlippageBps,
-              SOLANA_DEX_ROUND_TRIP_FEE_USD,
-            )
-            if (skimSliceNet >= minNetUsd) {
-              reason = 'profit_skim'
-              partialSkim = true
-            }
+            reason = 'profit_skim'
+            partialSkim = true
           }
         }
-        if (!reason && estNetUsd >= minNetUsd) {
-          reason = 'take_profit'
-          sellQty = lotQty
-        }
-      } else if (pct >= tp && estNetUsd >= minNetUsd) {
+      } else if (pct >= tp && !prefs.profitSkim) {
         reason = 'take_profit'
       } else if (trailingOn) {
         // Trailing stop v2 — three improvements over the naive "SL% below peak":

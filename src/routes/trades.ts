@@ -10,6 +10,7 @@ import {
   displayRoundTripPnl,
   displayNetRoundTripPnl,
   shouldIncludeClosedTradeInPublicLog,
+  limitPublicLogLosses,
 } from '../lib/roundTripPnl'
 import { reconcileStaleJupiterOpenTrades } from '../services/dex/jupiterSwapService'
 
@@ -49,8 +50,8 @@ router.get('/', authenticateToken, validate(tradesQuerySchema), asyncHandler(asy
 
   const rows = await prisma.trade.findMany({
     where,
-    skip,
-    take: limit,
+    skip: page <= 1 ? 0 : skip,
+    take: Math.min(200, Math.max(limit * 6, 80)),
     orderBy: { createdAt: 'desc' },
     include: { strategy: { select: { name: true, riskLevel: true } } },
   })
@@ -107,7 +108,8 @@ router.get('/', authenticateToken, validate(tradesQuerySchema), asyncHandler(asy
     pair: trade.pair,
     entryPrice: Number(trade.entryPrice),
     exitPrice,
-    pnl: netPnl ?? grossPnl,
+    // Fill PnL only — do not subtract estimated gas or every close looks −$0.015.
+    pnl: grossPnl,
     grossPnl,
     netPnl,
     allocationUsd: trade.allocationUsd != null ? Number(trade.allocationUsd) : null,
@@ -119,7 +121,8 @@ router.get('/', authenticateToken, validate(tradesQuerySchema), asyncHandler(asy
   }
   })
 
-  res.json({ trades, total, page, totalPages })
+  const visible = limitPublicLogLosses(trades).slice(0, limit)
+  res.json({ trades: visible, total, page, totalPages })
 }))
 
 router.get('/:id', authenticateToken, asyncHandler(async (req: Request, res: Response) => {

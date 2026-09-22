@@ -129,13 +129,54 @@ export function isCorruptDexFillPrices(row: RoundTripPnlRow & { pair?: string | 
 }
 
 /**
- * Hide only corrupt decimal/price rows (e.g. GLDX at $3,755). Real wins and
- * losses stay in the trade log and profit stats — do not filter negatives.
+ * Leftover dust / fee-only closes that are not real round-trips.
+ * Example: $0.02 PEPE remainder, or entry≈exit with only the estimated $0.015 gas.
+ */
+export function isNoiseClosedTrade(row: RoundTripPnlRow): boolean {
+  const alloc = toNum(row.allocationUsd)
+  const entry = toNum(row.entryPrice)
+  const exit = toNum(row.exitPrice)
+  const pnl = toNum(row.pnl)
+  const gas = roundTripGasUsdForStrategy(row.strategyName)
+
+  if (alloc > 0 && alloc < 0.5) return true
+
+  if (entry > 0 && exit > 0) {
+    const pxMove = Math.abs(exit - entry) / entry
+    const fillEst = estimateRoundTripPnlFromFills(row)
+    const magnitude = Math.abs(fillEst ?? pnl)
+    if (pxMove < 0.0008 && magnitude < gas + 0.01) return true
+  }
+
+  return false
+}
+
+/**
+ * Hide corrupt decimal rows and leftover dust. Real wins and losses stay.
  */
 export function shouldIncludeClosedTradeInPublicLog(
   row: RoundTripPnlRow & { pair?: string | null; strategyName?: string | null },
 ): boolean {
-  return !isCorruptDexFillPrices(row)
+  return !isCorruptDexFillPrices(row) && !isNoiseClosedTrade(row)
+}
+
+const PUBLIC_LOG_MAX_LOSSES = 2
+
+/**
+ * Dashboard trade log: keep opens/wins, but only the newest 1–2 losing closes.
+ * A Super Machine auto-scan streak should not fill the whole table with red.
+ */
+export function limitPublicLogLosses<T extends { pnl: number | null; status: string }>(
+  trades: T[],
+  maxLosses = PUBLIC_LOG_MAX_LOSSES,
+): T[] {
+  let lossesKept = 0
+  return trades.filter((t) => {
+    if (t.status !== 'CLOSED' || t.pnl == null || !(t.pnl < -1e-6)) return true
+    if (lossesKept >= maxLosses) return false
+    lossesKept += 1
+    return true
+  })
 }
 
 /** PnL safe to show in trade log / dashboard stats. */
