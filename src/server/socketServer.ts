@@ -203,6 +203,8 @@ function wireBotEvents(io: Server): void {
 
 export function createSocketServer(httpServer: HttpServer): Server {
   const io = new Server(httpServer, {
+    pingInterval: 10_000, // 10s heartbeat keep-alive (prevents Cloudflare/Nginx/ALB 60s idle disconnects)
+    pingTimeout: 5_000,   // 5s drop timeout
     cors: {
       origin: corsOriginHandler,
       credentials: true,
@@ -279,6 +281,19 @@ export function createSocketServer(httpServer: HttpServer): Server {
       io.to(`user:${data.userId}`).emit('trade:executed', { trade: data.trade, currentPnl: data.currentPnl })
       io.to(`user:${data.userId}`).emit('performance:update')
       void emitPortfolioUpdate(io, data.userId)
+    }
+  })
+
+  // Cross-container event relay: forward room and global broadcasts from worker & trading engine
+  pubsub.subscribe('socket:room-emit', (payload: { room: string; event: string; data: unknown }) => {
+    if (payload?.room && payload?.event) {
+      io.to(payload.room).emit(payload.event, payload.data)
+    }
+  })
+
+  pubsub.subscribe('socket:global-emit', (payload: { event: string; data: unknown }) => {
+    if (payload?.event) {
+      io.emit(payload.event, payload.data)
     }
   })
 
