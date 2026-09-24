@@ -22,7 +22,7 @@ import { liveTradingBot } from '../services/bot/liveTradingBot'
 import { advancedBot } from '../services/bot/advancedBot'
 import { telegramService } from '../services/notifications/telegramService'
 import { corsOriginHandler } from './cors'
-import { startJupiterLiveTicker } from '../services/dex/jupiterLiveTickerService'
+import { startJupiterLiveTicker, getLatestJupiterTicks } from '../services/dex/jupiterLiveTickerService'
 
 type JwtPayload = { userId: string }
 
@@ -225,11 +225,21 @@ export function createSocketServer(httpServer: HttpServer): Server {
     }
   })
 
-  io.on('connection', (socket) => {
+    io.on('connection', (socket) => {
     const userId = socket.data.userId as string
     socket.join(`user:${userId}`)
     connectedSocketCounts.set(userId, (connectedSocketCounts.get(userId) ?? 0) + 1)
     logger.info(`User ${userId} connected to socket`)
+
+    // Immediately push latest market prices to client (0ms delay)
+    try {
+      const initialTicks = getLatestJupiterTicks()
+      if (initialTicks.length > 0) {
+        socket.emit('jupiter:ticker', initialTicks)
+      }
+    } catch {
+      /* ignore */
+    }
 
     socket.on('disconnect', () => {
       const current = connectedSocketCounts.get(userId) ?? 0

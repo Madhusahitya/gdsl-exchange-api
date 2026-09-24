@@ -8,9 +8,26 @@
  * - Sub-millisecond response: getDepth() reads directly from RAM in ~0.05ms.
  * - Resilient fallback: data-api.binance.vision CDN + multi-endpoint REST backup.
  */
+import EventEmitter from 'events'
 import WebSocket from 'ws'
 import { logger } from '../../lib/logger'
 import { SYMBOLS } from './klineService'
+
+export const orderBookEmitter = new EventEmitter()
+
+export interface LiveBookTicker {
+  symbol: string
+  bid: number
+  ask: number
+  mid: number
+  ts: number
+}
+
+const bookTickerCache = new Map<string, LiveBookTicker>()
+
+export function getLiveBookTicker(symbol: string): LiveBookTicker | null {
+  return bookTickerCache.get(symbol.toUpperCase()) ?? null
+}
 
 const BINANCE_WS_URL = 'wss://stream.binance.com:9443/stream'
 const BINANCE_REST_ENDPOINTS = [
@@ -103,8 +120,9 @@ let isDisposed = false
 function connectWebSocket() {
   if (isDisposed) return
 
-  const streamNames = SYMBOLS.map((s) => `${s.toLowerCase()}@depth20@1000ms`).join('/')
-  const url = `${BINANCE_WS_URL}?streams=${streamNames}`
+  const depthStreams = SYMBOLS.map((s) => `${s.toLowerCase()}@depth20@1000ms`)
+  const bookStreams = SYMBOLS.map((s) => `${s.toLowerCase()}@bookTicker`)
+  const url = `${BINANCE_WS_URL}?streams=${[...depthStreams, ...bookStreams].join('/')}`
 
   try {
     const ws = new WebSocket(url)
@@ -115,7 +133,7 @@ function connectWebSocket() {
         ws.close()
         return
       }
-      logger.info(`[orderBook] Connected to Binance depth WebSocket (${SYMBOLS.length} core pairs)`)
+      logger.info(`[orderBook] Connected to Binance depth + real-time bookTicker stream (${SYMBOLS.length} core pairs)`)
     })
 
     ws.on('message', (raw) => {
@@ -123,10 +141,7 @@ function connectWebSocket() {
       try {
         const message = JSON.parse(raw.toString()) as {
           stream?: string
-          data?: {
-            bids?: [string, string][]
-            asks?: [string, string][]
-          }
+          data?: unknown
         }
 
         if (!message.stream || !message.data) return
@@ -134,7 +149,21 @@ function connectWebSocket() {
         if (!rawSymbol) return
         const sym = rawSymbol.toUpperCase()
 
-        const depth = parseDepthPayload(sym, message.data.bids ?? [], message.data.asks ?? [])
+        if (message.stream.includes('@bookTicker')) {
+          const rawData = message.data as { s?: string; b?: string; a?: string }
+          const b = parseFloat(rawData?.b || '0')
+          const a = parseFloat(rawData?.a || '0')
+          if (b > 0 && a > 0) {
+            const mid = (b + a) / 2
+            const tick: LiveBookTicker = { symbol: sym, bid: b, ask: a, mid, ts: Date.now() }
+            bookTickerCache.set(sym, tick)
+            orderBookEmitter.emit('bookTicker', tick)
+          }
+          return
+        }
+
+        const depthData = message.data as { bids?: [string, string][]; asks?: [string, string][] }
+        const depth = parseDepthPayload(sym, depthData.bids ?? [], depthData.asks ?? [])
         if (depth.obi !== null) obiCache.set(sym, depth.obi)
         lastDepthCache.set(sym, depth)
       } catch {

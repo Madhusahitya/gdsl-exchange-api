@@ -171,6 +171,12 @@ export async function getJupiterExecutableMarks(
     if (v3 != null) {
       if (askFinal == null) askFinal = v3
       if (bidFinal == null) bidFinal = v3
+    } else {
+      const cexMid = await fetchBinanceBookMid(binanceSym).catch(() => null)
+      if (cexMid != null && cexMid > 0) {
+        if (askFinal == null) askFinal = cexMid * 1.0003
+        if (bidFinal == null) bidFinal = cexMid * 0.9997
+      }
     }
   }
 

@@ -30,7 +30,7 @@ export function isJupiterPriceConfigured(): boolean {
 /** Per-mint price cache. `ts` = last successful fetch. Stale entries are kept for 429 fallback. */
 const priceCache = new Map<string, { quote: JupiterPriceQuote; ts: number }>()
 /** Prices younger than this are served from cache without hitting Jupiter. */
-const PRICE_FRESH_MS = 1_500
+const PRICE_FRESH_MS = 1_000
 /** Stale prices up to this age are still served when Jupiter is rate-limiting. */
 const PRICE_STALE_MS = 5 * 60_000
 let rateLimitedUntil = 0
