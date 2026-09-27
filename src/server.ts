@@ -26,6 +26,7 @@ import { logger } from './lib/logger'
 import { createApp } from './server/createApp'
 import { createSocketServer } from './server/socketServer'
 import { getRedisClient } from './lib/redis'
+import { setupGracefulShutdown } from './lib/shutdown'
 
 process.on('unhandledRejection', (reason) => {
   logger.error({ err: reason }, 'unhandledRejection in API server')
@@ -36,6 +37,8 @@ const httpServer = createServer(app)
 
 // Mount Socket.IO so localhost:8000 handles both REST API & WebSockets seamlessly
 createSocketServer(httpServer)
+
+setupGracefulShutdown(httpServer, 'API Server')
 
 httpServer.listen(env.PORT, async () => {
   logger.info(`[API Server] Core HTTP API running on http://localhost:${env.PORT}`)

@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gdsl-postgres-pvc
+  namespace: gdsl-exchange
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gdsl-postgres
+  namespace: gdsl-exchange
+  labels:
+    app: gdsl-postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gdsl-postgres
+  template:
+    metadata:
+      labels:
+        app: gdsl-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "CryptoflowSecurePass2026!"
+            - name: POSTGRES_DB
+              value: "cryptoflow"
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1536Mi"
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: gdsl-postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gdsl-postgres
+  namespace: gdsl-exchange
+spec:
+  type: ClusterIP
+  selector:
+    app: gdsl-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

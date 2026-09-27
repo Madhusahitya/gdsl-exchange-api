@@ -24,6 +24,7 @@ import { env } from './lib/env'
 import { logger } from './lib/logger'
 import { createSocketServer } from './server/socketServer'
 import { getRedisClient } from './lib/redis'
+import { setupGracefulShutdown } from './lib/shutdown'
 
 process.on('unhandledRejection', (reason) => {
   logger.error({ err: reason }, 'unhandledRejection in Socket Gateway')
@@ -40,6 +41,8 @@ const httpServer = createServer(app)
 const socketPort = env.SOCKET_PORT || 8001
 
 createSocketServer(httpServer)
+
+setupGracefulShutdown(httpServer, 'Socket Gateway')
 
 httpServer.listen(socketPort, async () => {
   logger.info(`[Socket Gateway] Realtime Socket.IO server running on port ${socketPort}`)

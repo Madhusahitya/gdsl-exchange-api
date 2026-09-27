@@ -29,8 +29,8 @@ spec:
         fsGroup: 1000
       containers:
         - name: api
-          image: gdsl-exchange-api:latest
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/faiyyajansari1466/gdsl-exchange-api:latest
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8000

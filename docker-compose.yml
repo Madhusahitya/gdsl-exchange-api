@@ -38,16 +38,18 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
+    stop_grace_period: 20s
     command: ["node", "dist/server.js"]
     ports:
-      - '8000:8000'
+      - '${API_HOST_PORT:-8000}:8000'
     env_file:
       - .env
     environment:
       NODE_ENV: production
       PORT: 8000
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
+      REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
+      ALLOWED_CORS_ORIGINS: http://localhost:8003,http://localhost:3000,http://127.0.0.1:8003,http://127.0.0.1:3000
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -60,16 +62,18 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
+    stop_grace_period: 20s
     command: ["node", "dist/socket.js"]
     ports:
-      - '8001:8001'
+      - '${SOCKET_HOST_PORT:-8001}:8001'
     env_file:
       - .env
     environment:
       NODE_ENV: production
       SOCKET_PORT: 8001
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
+      REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
+      ALLOWED_CORS_ORIGINS: http://localhost:8003,http://localhost:3000,http://127.0.0.1:8003,http://127.0.0.1:3000
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -82,13 +86,14 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
+    stop_grace_period: 20s
     command: ["node", "dist/tradingEngine.js"]
     env_file:
       - .env
     environment:
       NODE_ENV: production
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
+      REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -101,13 +106,14 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
+    stop_grace_period: 20s
     command: ["node", "dist/worker.js"]
     env_file:
       - .env
     environment:
       NODE_ENV: production
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
+      REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://postgres:root@host.docker.internal:5432/cryptoflow?schema=public}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
