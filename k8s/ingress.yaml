@@ -13,11 +13,24 @@ metadata:
 spec:
   tls:
     - hosts:
+        - staging.eizy.trade
         - staging-api.eizy.trade
         - staging-socket.eizy.trade
       secretName: eizy-staging-tls-secret
   rules:
-    # 1. REST API Domain
+    # 1. Web App Frontend Domain
+    - host: staging.eizy.trade
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gdsl-web-service
+                port:
+                  number: 3000
+
+    # 2. REST API Domain
     - host: staging-api.eizy.trade
       http:
         paths:

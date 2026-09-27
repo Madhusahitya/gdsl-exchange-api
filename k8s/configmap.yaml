@@ -8,6 +8,7 @@ data:
   PORT: "8000"
   SOCKET_PORT: "8001"
   FRONTEND_URL: "https://staging.eizy.trade"
-  ALLOWED_CORS_ORIGINS: "https://staging.eizy.trade,https://staging-api.eizy.trade,https://staging-socket.eizy.trade"
+  COOKIE_DOMAIN: ".eizy.trade"
+  ALLOWED_CORS_ORIGINS: "https://staging.eizy.trade,https://staging-api.eizy.trade,https://staging-socket.eizy.trade,http://localhost:8003,http://localhost:3000,http://127.0.0.1:8003,http://127.0.0.1:3000"
   DEFAULT_CHAIN: "BSC"
   DEMO_MODE: "false"
