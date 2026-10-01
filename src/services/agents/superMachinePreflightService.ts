@@ -41,22 +41,27 @@ export async function computeAutoPreflight(userId: string): Promise<AutoPrefligh
   type Scored = { sym: string; base: string; signal: string; score: number; techReason: string }
   const scored: Scored[] = []
 
-  for (const item of suggestions.slice(0, 15)) {
-    const tech = await technicalVote(item.binanceSymbol)
-    if (!hasUsableCandles(tech.reason)) continue
-
-    const majorBonus = MAJOR_BASES.has(item.baseSymbol.toUpperCase()) ? 0.2 : 0
-    const solBonus = item.baseSymbol.toUpperCase() === 'SOL' ? 0.15 : 0
-    const techBonus = tech.vote === 'BUY' ? 0.15 : tech.vote === 'AVOID' ? -0.25 : 0
-    const liqBonus = item.liquidityUsd >= 500_000 ? 0.1 : item.liquidityUsd >= 150_000 ? 0.05 : 0
-
-    scored.push({
-      sym: item.binanceSymbol,
-      base: item.baseSymbol,
-      signal: item.signal,
-      score: item.score / 100 + majorBonus + solBonus + techBonus + liqBonus,
-      techReason: tech.reason,
-    })
+  const batch = await Promise.all(
+    suggestions.slice(0, 8).map(async (item) => {
+      try {
+        const tech = await technicalVote(item.binanceSymbol)
+        if (!hasUsableCandles(tech.reason)) return null
+        const techBonus = tech.vote === 'BUY' ? 0.15 : tech.vote === 'AVOID' ? -0.25 : 0
+        const liqBonus = item.liquidityUsd >= 500_000 ? 0.1 : item.liquidityUsd >= 150_000 ? 0.05 : 0
+        return {
+          sym: item.binanceSymbol,
+          base: item.baseSymbol,
+          signal: item.signal,
+          score: item.score / 100 + techBonus + liqBonus,
+          techReason: tech.reason,
+        }
+      } catch {
+        return null
+      }
+    }),
+  )
+  for (const row of batch) {
+    if (row) scored.push(row)
   }
 
   scored.sort((a, b) => b.score - a.score)

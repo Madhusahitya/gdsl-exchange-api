@@ -76,8 +76,10 @@ const WIN_RATE_TARGET = { min: 65, max: 70 }
 const BASE_THRESHOLD = 0.63
 /** Votes below this confidence are treated as offline / non-counting. */
 const MIN_VOTE_CONFIDENCE = 0.63
-/** Momentum, technical, and risk must reach this bar to vote BUY. */
-const CORE_BUY_CONFIDENCE = 0.9
+/** Momentum, technical, and risk must reach this bar to vote BUY.
+ *  0.90 was above what the technical voter can emit on a normal EMA cross,
+ *  so core agreement almost never happened and good setups were held. */
+const CORE_BUY_CONFIDENCE = 0.72
 const CORE_AGENT_IDS: CouncilAgentId[] = ['momentum', 'technical', 'risk']
 const VETO_CONFIDENCE = 0.72
 /** Require stronger agreement before auto-buying (was 2). */
@@ -286,11 +288,17 @@ export async function councilEvaluate(opts: {
         confidence: 0.75,
         reason: risk.reasons[0] ?? `Gate: ${risk.blocked.replace(/_/g, ' ')}`,
       }
-    : {
-        vote: risk.pUp >= CORE_BUY_CONFIDENCE ? 'BUY' : 'HOLD',
-        confidence: Math.min(0.95, Math.max(MIN_VOTE_CONFIDENCE, risk.pUp)),
-        reason: `Regime ${risk.regime} · pUp ${(risk.pUp * 100).toFixed(0)}%`,
-      }
+    : risk.action === 'BUY' && risk.confidence >= CORE_BUY_CONFIDENCE
+      ? {
+          vote: 'BUY',
+          confidence: Math.min(0.95, Math.max(MIN_VOTE_CONFIDENCE, risk.confidence)),
+          reason: `Setup ${(risk.confidence * 100).toFixed(0)}% · ${risk.regime} pUp ${(risk.pUp * 100).toFixed(0)}%`,
+        }
+      : {
+          vote: 'HOLD',
+          confidence: risk.confidence >= MIN_VOTE_CONFIDENCE ? Math.min(0.95, risk.confidence) : 0,
+          reason: `Setup ${(risk.confidence * 100).toFixed(0)}% below risk bar · ${risk.regime} pUp ${(risk.pUp * 100).toFixed(0)}%`,
+        }
 
   // LLM only consulted when there is a live candidate that passed the gates —
   // saves quota and keeps latency out of no-op ticks.
@@ -417,7 +425,7 @@ export async function councilEvaluate(opts: {
   } else if (consensus < threshold) {
     reasons.push(`Consensus ${(consensus * 100).toFixed(0)}% below adaptive bar ${(threshold * 100).toFixed(0)}%`)
   } else if (!enoughBuys) {
-    reasons.push(`Only ${buyVotes} BUY vote(s) — need ${MIN_BUY_VOTES} agents, or momentum+technical both BUY`)
+    reasons.push(`Only ${buyVotes} BUY vote(s) — need ${MIN_BUY_VOTES} agents, or momentum, technical, and risk all BUY`)
   }
 
   const decision: CouncilDecision = {

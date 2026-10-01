@@ -15,6 +15,7 @@ import { decide } from '../bot/metaPolicy'
 import { getJupiterTradeSuggestions, type TradeSuggestion } from '../dex/jupiterTrendingService'
 import { getJupiterTradeSignals } from '../dex/jupiterSignalService'
 import { isTier1Major } from '../../lib/tier1Majors'
+import { compareTradeRank } from './candidateRank'
 import { logger } from '../../lib/logger'
 
 export type SuperMachineSettings = {
@@ -125,21 +126,23 @@ function isOverextended(item: TradeSuggestion): string | null {
   return null
 }
 
-function pickToken(
+type ScoredPick = {
+  pick: TradeSuggestion
+  volumeScore: number
+  momentumScore: number
+  totalScore: number
+}
+
+function rankTokens(
   suggestions: TradeSuggestion[],
   settings: SuperMachineSettings,
   openBases: Set<string>,
   signals: Array<{ symbol: string; action: string; score: number }>,
-): { pick: TradeSuggestion; volumeScore: number; momentumScore: number } | null {
+): ScoredPick[] {
   const minRank = settings.minSignal === 'strong' ? 3 : 2
-  
-  const scored: Array<{
-    item: TradeSuggestion
-    volumeScore: number
-    momentumScore: number
-    totalScore: number
-  }> = []
-  
+
+  const scored: Array<ScoredPick & { isMajor: boolean }> = []
+
   for (const item of suggestions) {
     if (settings.watchSymbol) {
       const want = settings.watchSymbol.toUpperCase()
@@ -149,33 +152,22 @@ function pickToken(
     if (item.liquidityUsd < settings.minLiquidityUsd) continue
     if (openBases.has(item.baseSymbol.toUpperCase())) continue
     if (isOverextended(item)) continue
-    
+
     const volumeScore = calculateVolumeScore(item)
     const momentumScore = calculateMomentumScore(item, signals)
-    const totalScore = (volumeScore * 0.35) + (momentumScore * 0.65)
-    
-    scored.push({ item, volumeScore, momentumScore, totalScore })
-  }
-  
-  if (scored.length === 0) return null
+    const totalScore = volumeScore * 0.35 + momentumScore * 0.65
 
-  scored.sort((a, b) => {
-    const aMajor = isTier1Major(a.item.baseSymbol)
-    const bMajor = isTier1Major(b.item.baseSymbol)
-    if (aMajor !== bMajor) {
-      if (aMajor && b.totalScore > a.totalScore * 1.18) return 1
-      if (bMajor && a.totalScore > b.totalScore * 1.18) return -1
-      return bMajor ? 1 : -1
-    }
-    return b.totalScore - a.totalScore
-  })
-  const best = scored[0]
-  
-  return {
-    pick: best.item,
-    volumeScore: best.volumeScore,
-    momentumScore: best.momentumScore,
+    scored.push({
+      pick: item,
+      volumeScore,
+      momentumScore,
+      totalScore,
+      isMajor: isTier1Major(item.baseSymbol),
+    })
   }
+
+  scored.sort(compareTradeRank)
+  return scored
 }
 
 function calculateAdaptiveThreshold(quant: QuantPayload | null): number {
@@ -201,7 +193,6 @@ export async function evaluateJupiterRisk(opts: {
 }): Promise<RiskDecision> {
   const { userId, settings, openCount, openBases } = opts
   const equity = opts.equityUsdt ?? 1000
-  const reasons: string[] = []
 
   const defaultDecision = (blocked: string, reason: string, quant: QuantPayload | null = null, oracle: OraclePayload | null = null): RiskDecision => ({
     action: 'HOLD',
@@ -244,9 +235,9 @@ export async function evaluateJupiterRisk(opts: {
       getJupiterTradeSignals(15),
     ])
 
-    const pickResult = pickToken(suggestions, settings, openBases, signals)
-    
-    if (!pickResult) {
+    const ranked = rankTokens(suggestions, settings, openBases, signals)
+
+    if (ranked.length === 0) {
       markAgentTick('risk')
       const lockMsg = settings.watchSymbol
         ? `Pair lock ${settings.watchSymbol}: token did not pass liquidity/signal filters`
@@ -254,70 +245,113 @@ export async function evaluateJupiterRisk(opts: {
       return defaultDecision('no_qualifying_pick', lockMsg, quant, oracle)
     }
 
-    const { pick, volumeScore, momentumScore } = pickResult
     const entryScore = calculateEntryScore(quant, oracle)
-    
-    const boardSignal = signals.find(
-      (s) => s.symbol === pick.binanceSymbol || s.baseSymbol === pick.baseSymbol,
-    )
-    const momentumBoost = boardSignal?.action === 'BUY' ? 0.1 : 0
+    // Token-specific misses: try the next-best setup. Account-wide blocks stop the tick.
+    const skippable = new Set(['low_confidence', 'low_volume', 'negative_sentiment'])
+    const shortlist = ranked.slice(0, 3)
+    let firstMiss: RiskDecision | null = null
 
-    const meta = await decide(
-      pick.binanceSymbol,
-      userId,
-      openCount > 0 ? 1 : 0,
-      0,
-      0,
-      equity,
-    )
+    for (let i = 0; i < shortlist.length; i++) {
+      const { pick, volumeScore, momentumScore } = shortlist[i]
+      const why: string[] = []
+      const boardSignal = signals.find(
+        (s) => s.symbol === pick.binanceSymbol || s.baseSymbol === pick.baseSymbol,
+      )
+      const momentumBoost = boardSignal?.action === 'BUY' ? 0.1 : 0
 
-    let sentimentBoost = 0
-    if (oracle && oracle.confidence > 0.35) {
-      // SOL-only news: only boost SOL picks meaningfully; mute for unrelated tokens.
+      const meta = await decide(
+        pick.binanceSymbol,
+        userId,
+        openCount > 0 ? 1 : 0,
+        0,
+        0,
+        equity,
+      )
+
+      let sentimentBoost = 0
+      if (oracle && oracle.confidence > 0.35) {
+        // SOL-only news: only boost SOL picks meaningfully; mute for unrelated tokens.
+        const isSolPick = pick.baseSymbol.toUpperCase() === 'SOL'
+        sentimentBoost = oracle.sentimentScore * (isSolPick ? 0.08 : 0.02)
+      }
+
+      const hold = (
+        blocked: string,
+        holdReasons: string[],
+        confidence = 0,
+        orderSizeUsd = 0,
+      ): RiskDecision => ({
+        action: 'HOLD',
+        pick,
+        confidence,
+        orderSizeUsd,
+        blocked,
+        reasons: holdReasons,
+        quant,
+        oracle,
+        regime: meta.regime,
+        pUp: meta.pUp,
+        entryScore,
+        volumeScore,
+        momentumScore,
+      })
+
+      if (oracle && oracle.sentimentScore < -0.35 && oracle.confidence > 0.45 && pick.baseSymbol.toUpperCase() === 'SOL') {
+        const miss = hold('negative_sentiment', ['Oracle: significant negative SOL news flow — pausing SOL entries'])
+        if (!firstMiss) firstMiss = miss
+        continue
+      }
+
+      // Prefer Jupiter momentum/volume for Solana execution; CEX meta-policy is a soft bias only.
       const isSolPick = pick.baseSymbol.toUpperCase() === 'SOL'
-      sentimentBoost = oracle.sentimentScore * (isSolPick ? 0.08 : 0.02)
-    }
-    
-    if (oracle && oracle.sentimentScore < -0.35 && oracle.confidence > 0.45 && pick.baseSymbol.toUpperCase() === 'SOL') {
-      return {
-        action: 'HOLD',
-        pick,
-        confidence: 0,
-        orderSizeUsd: 0,
-        blocked: 'negative_sentiment',
-        reasons: ['Oracle: significant negative SOL news flow — pausing entries'],
-        quant,
-        oracle,
-        regime: meta.regime,
-        pUp: meta.pUp,
-        entryScore,
-        volumeScore,
-        momentumScore,
+      const metaWeight = isSolPick ? 0.45 : 0.15
+      const jupiterWeight = isSolPick ? 0.35 : 0.7
+      const rawConfidence =
+        meta.pUp * metaWeight +
+        momentumBoost +
+        sentimentBoost +
+        (pick.score / 100) * jupiterWeight +
+        entryScore * 0.1 +
+        volumeScore * 0.08
+      const confidence = Math.min(1, Math.max(0, rawConfidence))
+      const orderSizeUsd = Math.min(settings.maxTradeUsd, meta.orderSizeUsdt || settings.maxTradeUsd)
+
+      if (meta.blocked) {
+        return hold(meta.blocked, [`Meta-policy blocked: ${meta.blocked}`], confidence)
       }
-    }
 
-    // Prefer Jupiter momentum/volume for Solana execution; CEX meta-policy is a soft bias only.
-    const isSolPick = pick.baseSymbol.toUpperCase() === 'SOL'
-    const metaWeight = isSolPick ? 0.45 : 0.15
-    const jupiterWeight = isSolPick ? 0.35 : 0.7
-    const rawConfidence =
-      meta.pUp * metaWeight +
-      momentumBoost +
-      sentimentBoost +
-      (pick.score / 100) * jupiterWeight +
-      entryScore * 0.1 +
-      volumeScore * 0.08
-    const confidence = Math.min(1, Math.max(0, rawConfidence))
-    const orderSizeUsd = Math.min(settings.maxTradeUsd, meta.orderSizeUsdt || settings.maxTradeUsd)
+      const adaptiveThreshold = calculateAdaptiveThreshold(quant)
 
-    if (meta.blocked) {
-      return {
-        action: 'HOLD',
+      if (confidence < adaptiveThreshold) {
+        why.push(`Confidence ${(confidence * 100).toFixed(0)}% below adaptive threshold ${(adaptiveThreshold * 100).toFixed(0)}%`)
+        const miss = hold('low_confidence', why, confidence)
+        if (!firstMiss) firstMiss = miss
+        continue
+      }
+
+      if (volumeScore < 0.45) {
+        why.push(`Volume score ${(volumeScore * 100).toFixed(0)}% below threshold — thin liquidity risk`)
+        const miss = hold('low_volume', why, confidence)
+        if (!firstMiss) firstMiss = miss
+        continue
+      }
+
+      why.push(
+        `${pick.baseSymbol} ${pick.signal} · raw=${pick.score.toFixed(0)} vol=${(volumeScore * 100).toFixed(0)}%`,
+        `Meta ${meta.regime} pUp=${(meta.pUp * 100).toFixed(0)}%`,
+        `Entry=${(entryScore * 100).toFixed(0)}% Mom=${(momentumScore * 100).toFixed(0)}%`,
+      )
+      if (i > 0) why.push(`Skipped ${i} weaker or gated name${i === 1 ? '' : 's'} ahead of this setup`)
+      if (boardSignal?.action === 'BUY') why.push(`Signal board: ${boardSignal.rationale}`)
+      if (oracle?.catalyst) why.push(`Oracle: ${oracle.catalyst}`)
+
+      const payload: RiskDecision = {
+        action: 'BUY',
         pick,
         confidence,
-        orderSizeUsd: 0,
-        blocked: meta.blocked,
-        reasons: [`Meta-policy blocked: ${meta.blocked}`],
+        orderSizeUsd,
+        blocked: null,
+        reasons: why,
         quant,
         oracle,
         regime: meta.regime,
@@ -326,93 +360,41 @@ export async function evaluateJupiterRisk(opts: {
         volumeScore,
         momentumScore,
       }
-    }
 
-    const adaptiveThreshold = calculateAdaptiveThreshold(quant)
-    
-    if (confidence < adaptiveThreshold) {
-      reasons.push(`Confidence ${(confidence * 100).toFixed(0)}% below adaptive threshold ${(adaptiveThreshold * 100).toFixed(0)}%`)
+      agentBus.publish({
+        agentId: 'risk',
+        stream: 'risk:signal',
+        payload,
+        ts: Date.now(),
+        ttlMs: 60_000,
+      })
       markAgentTick('risk')
-      return {
-        action: 'HOLD',
-        pick,
-        confidence,
-        orderSizeUsd: 0,
-        blocked: 'low_confidence',
-        reasons,
-        quant,
-        oracle,
-        regime: meta.regime,
-        pUp: meta.pUp,
-        entryScore,
-        volumeScore,
-        momentumScore,
-      }
+
+      logger.info({
+        userId,
+        symbol: pick.baseSymbol,
+        confidence: confidence.toFixed(3),
+        entryScore: entryScore.toFixed(3),
+        volumeScore: volumeScore.toFixed(3),
+        momentumScore: momentumScore.toFixed(3),
+        rank: i + 1,
+      }, '[risk-v2] BUY signal generated')
+
+      return payload
     }
 
-    if (volumeScore < 0.45) {
-      reasons.push(`Volume score ${(volumeScore * 100).toFixed(0)}% below threshold — thin liquidity risk`)
-      markAgentTick('risk')
-      return {
-        action: 'HOLD',
-        pick,
-        confidence,
-        orderSizeUsd: 0,
-        blocked: 'low_volume',
-        reasons,
-        quant,
-        oracle,
-        regime: meta.regime,
-        pUp: meta.pUp,
-        entryScore,
-        volumeScore,
-        momentumScore,
-      }
-    }
-
-    reasons.push(
-      `${pick.baseSymbol} ${pick.signal} · raw=${pick.score.toFixed(0)} vol=${(volumeScore * 100).toFixed(0)}%`,
-      `Meta ${meta.regime} pUp=${(meta.pUp * 100).toFixed(0)}%`,
-      `Entry=${(entryScore * 100).toFixed(0)}% Mom=${(momentumScore * 100).toFixed(0)}%`,
-    )
-    if (boardSignal?.action === 'BUY') reasons.push(`Signal board: ${boardSignal.rationale}`)
-    if (oracle?.catalyst) reasons.push(`Oracle: ${oracle.catalyst}`)
-
-    const payload: RiskDecision = {
-      action: 'BUY',
-      pick,
-      confidence,
-      orderSizeUsd,
-      blocked: null,
-      reasons,
-      quant,
-      oracle,
-      regime: meta.regime,
-      pUp: meta.pUp,
-      entryScore,
-      volumeScore,
-      momentumScore,
-    }
-
-    agentBus.publish({
-      agentId: 'risk',
-      stream: 'risk:signal',
-      payload,
-      ts: Date.now(),
-      ttlMs: 60_000,
-    })
     markAgentTick('risk')
-    
-    logger.info({
-      userId,
-      symbol: pick.baseSymbol,
-      confidence: confidence.toFixed(3),
-      entryScore: entryScore.toFixed(3),
-      volumeScore: volumeScore.toFixed(3),
-      momentumScore: momentumScore.toFixed(3),
-    }, '[risk-v2] BUY signal generated')
-    
-    return payload
+    const missed = firstMiss ?? defaultDecision('no_qualifying_pick', 'No candidate cleared the entry gates', quant, oracle)
+    if (shortlist.length > 1 && !skippable.has(missed.blocked ?? '')) {
+      return missed
+    }
+    return {
+      ...missed,
+      reasons: [
+        ...missed.reasons,
+        shortlist.length > 1 ? `Checked ${shortlist.length} ranked tokens — none cleared the entry gates` : missed.reasons[0],
+      ].filter((line, idx, arr) => line && arr.indexOf(line) === idx),
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     markAgentTick('risk', msg)

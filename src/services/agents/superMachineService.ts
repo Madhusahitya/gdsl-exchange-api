@@ -105,6 +105,7 @@ const MAX_ACTIVITY_EVENTS = 500
 
 let globalAgentsStarted = false
 let watcherTimer: NodeJS.Timeout | null = null
+let watcherRunning = false
 let strategyIdCache: string | null = null
 const activityLog = new Map<string, ActivityEvent[]>()
 const pendingSignals = new Map<string, { symbol: string; price: number; ts: number; confidence: number }>()
@@ -112,6 +113,21 @@ const pendingSignals = new Map<string, { symbol: string; price: number; ts: numb
 function clamp(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min
   return Math.min(max, Math.max(min, n))
+}
+
+/** Wallet and preflight calls must not hold the on/off request open. */
+async function within<T>(ms: number, work: Promise<T>): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), ms)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /** Auto-scan trade cap from live USDC — risk gates still apply on top. */
@@ -283,31 +299,42 @@ export async function setSuperMachineSettings(
       : prev.trailingEntry,
   }
 
+  // A full off clears the pause so the next on is a clean start, not a stuck emergency stop.
+  if (!next.enabled) next.emergencyStop = false
+
   // Auto-scan needs room for multiple tokens — never cap at 1 while scanning all pairs.
   if (!next.watchSymbol && next.maxOpenPositions < 3) {
     next.maxOpenPositions = 3
   }
 
+  const turningOn = next.enabled && !prev.enabled
+
   // Auto-scan sizes from wallet USDC — not a fixed $10 cap.
-  // Skip on disable so turning the machine off is instant and cannot hang the toggle.
+  // Bound the RPC so turning the machine on or off cannot hang the toggle.
   if (next.enabled && !next.watchSymbol) {
-    try {
-      const bal = await getSolanaBalances(userId)
+    const bal = await within(2_500, getSolanaBalances(userId).catch(() => undefined))
+    if (bal && Number.isFinite(bal.usdc)) {
       next.maxTradeUsd = walletMaxTradeUsd(bal.usdc)
       next.maxDailyVolumeUsd = Math.max(next.maxDailyVolumeUsd, Math.round(bal.usdc * 2.5))
-    } catch {
-      /* keep saved cap */
     }
   }
 
   const existing = await prisma.jupiterSuperMachineConfig.findUnique({ where: { userId } })
 
   // One-click mode: auto-configure strategy and sizing — never lock a pair in auto-scan.
-  if (next.enabled && !prev.enabled && !next.watchSymbol) {
-    try {
-      const pf = await computeAutoPreflight(userId)
+  // Time-boxed so a slow candle scan cannot fail the enable request.
+  if (turningOn && !next.watchSymbol) {
+    const pf = await within(4_000, computeAutoPreflight(userId).catch((err) => {
+      logger.warn({ err, userId }, '[super-machine] auto-preflight failed')
+      addActivity(userId, {
+        type: 'error',
+        message: `Auto-preflight failed: ${err instanceof Error ? err.message : 'unknown'} — scanning with saved limits`,
+      })
+      return undefined
+    }))
+    if (pf) {
       const { watchSymbol: _pairLock, ...sizingOnly } = pf.settings
-      next = { ...next, ...sizingOnly, watchSymbol: null }
+      next = { ...next, ...sizingOnly, watchSymbol: null, enabled: true, emergencyStop: false }
       const steps = pf.steps.filter((s) => s.field !== 'watchSymbol' && s.field !== 'pair')
       emitPreflight(userId, steps)
       addActivity(userId, {
@@ -315,55 +342,63 @@ export async function setSuperMachineSettings(
         message: `Agent setup: ${pf.strategyKey} · $${pf.settings.maxTradeUsd} · auto-scan (all tokens)`,
         details: { preflight: steps, slippagePct: pf.slippagePct },
       })
-    } catch (err) {
-      logger.warn({ err, userId }, '[super-machine] auto-preflight failed')
+    } else {
       addActivity(userId, {
-        type: 'error',
-        message: `Auto-preflight failed: ${err instanceof Error ? err.message : 'unknown'} — pick a pair on the chart first`,
+        type: 'signal',
+        message: 'Super Machine on — setup scan was slow, using saved limits',
       })
     }
   }
 
-  if (next.enabled && !existing?.botRunId) {
-    const strategyId = await jupiterStrategyId()
-    const run = await prisma.botRun.create({
-      data: { userId, strategyId, status: BotRunStatus.RUNNING },
-    })
-    await prisma.jupiterSuperMachineConfig.upsert({
-      where: { userId },
-      create: {
-        userId,
-        ...serializeSettings(next),
-        startedAt: new Date(),
-        botRunId: run.id,
-      },
-      update: {
-        ...serializeSettings(next),
-        startedAt: new Date(),
-        botRunId: run.id,
-      },
-    })
-    await prisma.executionEvent.create({
-      data: {
-        userId,
-        botRunId: run.id,
-        eventType: ExecutionEventType.BOT_STARTED,
-        payload: { source: 'jupiter-super-machine-v2', settings: next },
-      },
-    })
-    addActivity(userId, { type: 'signal', message: '🚀 Super Machine v2 activated', details: { settings: next } })
-  } else {
-    await prisma.jupiterSuperMachineConfig.upsert({
-      where: { userId },
-      create: { userId, ...serializeSettings(next) },
-      update: serializeSettings(next),
-    })
+  let botRunId = existing?.botRunId ?? null
+  if (turningOn) {
+    try {
+      const strategyId = await jupiterStrategyId()
+      if (existing?.botRunId) {
+        await prisma.botRun.updateMany({
+          where: { id: existing.botRunId, status: BotRunStatus.RUNNING },
+          data: { status: BotRunStatus.STOPPED, stoppedAt: new Date(), stopReason: 'super_machine_restart' },
+        })
+      }
+      const run = await prisma.botRun.create({
+        data: { userId, strategyId, status: BotRunStatus.RUNNING },
+      })
+      botRunId = run.id
+      await prisma.executionEvent.create({
+        data: {
+          userId,
+          botRunId: run.id,
+          eventType: ExecutionEventType.BOT_STARTED,
+          payload: { source: 'jupiter-super-machine-v2', settings: next },
+        },
+      })
+      addActivity(userId, { type: 'signal', message: '🚀 Super Machine v2 activated', details: { settings: next } })
+    } catch (err) {
+      logger.warn({ err, userId }, '[super-machine] bot run start failed')
+      addActivity(userId, {
+        type: 'error',
+        message: `Enabled, but the run record failed: ${err instanceof Error ? err.message : 'unknown'}`,
+      })
+    }
   }
+
+  await prisma.jupiterSuperMachineConfig.upsert({
+    where: { userId },
+    create: {
+      userId,
+      ...serializeSettings(next),
+      ...(turningOn ? { startedAt: new Date(), botRunId } : {}),
+    },
+    update: {
+      ...serializeSettings(next),
+      ...(turningOn ? { startedAt: new Date(), botRunId } : {}),
+    },
+  })
 
   if (next.enabled) {
     setJupiterAutopilotSettings(userId, { enabled: false })
     ensureGlobalAgents()
-  } else if (existing?.botRunId) {
+  } else if (prev.enabled && existing?.botRunId) {
     await prisma.botRun.updateMany({
       where: { id: existing.botRunId, status: BotRunStatus.RUNNING },
       data: { status: BotRunStatus.STOPPED, stoppedAt: new Date(), stopReason: 'super_machine_disabled' },
@@ -529,7 +564,7 @@ async function tickUser(
   const userId = row.userId
   let settings = toSettings(row as Parameters<typeof toSettings>[0])
 
-  if (settings.emergencyStop) return
+  if (!settings.enabled || settings.emergencyStop) return
 
   if (!settings.watchSymbol && settings.maxOpenPositions < 3) {
     settings = { ...settings, maxOpenPositions: 3 }
@@ -736,6 +771,15 @@ async function tickUser(
     details: { slippage: fees.slippageBps, priority: fees.priorityLevel },
   })
 
+  const live = await prisma.jupiterSuperMachineConfig.findUnique({
+    where: { id: refreshed.id },
+    select: { enabled: true, emergencyStop: true },
+  })
+  if (!live?.enabled || live.emergencyStop) {
+    addActivity(userId, { type: 'skip', message: 'Stopped before the swap — Super Machine is off' })
+    return
+  }
+
   let result: Awaited<ReturnType<typeof executeJupiterSwap>>
   try {
     result = await executeJupiterSwap(userId, {
@@ -862,33 +906,39 @@ async function tickUser(
 }
 
 export async function runSuperMachineWatcher(): Promise<void> {
+  if (watcherRunning) return
   if (!env.dexServerAutoExit || !isSolanaWalletEnabled() || !isJupiterConfigured()) return
 
-  ensureGlobalAgents()
+  watcherRunning = true
+  try {
+    ensureGlobalAgents()
 
-  // When Jupiter is rate-limited, skip new BUY ticks but keep agents healthy.
-  // Exits are handled by jupiterOpenPositionWatcher (separate path).
-  if (isJupiterSwapRateLimited()) {
-    logger.debug('[super-machine-v2] skipping BUY ticks — Jupiter rate-limited')
-    return
-  }
-
-  const rows = await prisma.jupiterSuperMachineConfig.findMany({
-    where: { enabled: true, emergencyStop: false },
-  })
-  if (rows.length === 0) return
-
-  for (const row of rows) {
-    try {
-      await tickUser(row)
-    } catch (err) {
-      const userId = row.userId
-      logger.warn({ err, userId }, '[super-machine-v2] tick failed')
-      addActivity(userId, { type: 'error', message: `⚠️ Tick error: ${err instanceof Error ? err.message : 'unknown'}` })
+    // When Jupiter is rate-limited, skip new BUY ticks but keep agents healthy.
+    // Exits are handled by jupiterOpenPositionWatcher (separate path).
+    if (isJupiterSwapRateLimited()) {
+      logger.debug('[super-machine-v2] skipping BUY ticks — Jupiter rate-limited')
+      return
     }
-  }
 
-  agentBus.prune()
+    const rows = await prisma.jupiterSuperMachineConfig.findMany({
+      where: { enabled: true, emergencyStop: false },
+    })
+    if (rows.length === 0) return
+
+    for (const row of rows) {
+      try {
+        await tickUser(row)
+      } catch (err) {
+        const userId = row.userId
+        logger.warn({ err, userId }, '[super-machine-v2] tick failed')
+        addActivity(userId, { type: 'error', message: `⚠️ Tick error: ${err instanceof Error ? err.message : 'unknown'}` })
+      }
+    }
+
+    agentBus.prune()
+  } finally {
+    watcherRunning = false
+  }
 }
 
 export function startSuperMachineWatcher(): void {

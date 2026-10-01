@@ -138,7 +138,7 @@ export async function getJupiterTradeSuggestions(limit = 8): Promise<{
         name: cat.name,
         usdPrice: row.lastPrice,
         liquidity: Math.max(row.quoteVolume * 0.08, 400_000),
-        organicScore: 88,
+        organicScore: 50,
         isVerified: true,
         stats5m: {
           priceChange: Math.max(-5, Math.min(8, ch24 * 0.04)),
@@ -190,7 +190,7 @@ export async function getJupiterTradeSuggestions(limit = 8): Promise<{
     })
   }
 
-  // Prefer liquid, not-overextended names — thin meme pumps confuse users vs chart mid.
+  // Rank by momentum score. Majors only get the small score bonus above — they do not jump the queue.
   const filtered = items.filter(
     (i) =>
       i.liquidityUsd >= 75_000 &&
@@ -198,12 +198,7 @@ export async function getJupiterTradeSuggestions(limit = 8): Promise<{
       i.change1h <= 25 &&
       i.usdPrice > 0,
   )
-  filtered.sort((a, b) => {
-    const aTier = isTier1Major(a.baseSymbol) ? 1 : 0
-    const bTier = isTier1Major(b.baseSymbol) ? 1 : 0
-    if (aTier !== bTier) return bTier - aTier
-    return b.score - a.score
-  })
+  filtered.sort((a, b) => b.score - a.score)
   const top = filtered.slice(0, Math.max(limit, 12))
 
   // Overlay Jupiter Price API v3 (same source as the chart) so idea cards match candles.

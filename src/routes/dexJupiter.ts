@@ -201,11 +201,11 @@ const limitOrderBody = z.object({
 
 const superMachineSettingsBody = z.object({
   enabled: z.boolean().optional(),
-  maxTradeUsd: z.number().min(5).max(100).optional(),
-  maxOpenPositions: z.number().int().min(1).max(5).optional(),
-  maxDailyTrades: z.number().int().min(1).max(50).optional(),
-  maxDailyVolumeUsd: z.number().min(20).max(5000).optional(),
-  minLiquidityUsd: z.number().min(50_000).max(5_000_000).optional(),
+  maxTradeUsd: z.number().min(5).max(200).optional(),
+  maxOpenPositions: z.number().int().min(1).max(10).optional(),
+  maxDailyTrades: z.number().int().min(1).max(100).optional(),
+  maxDailyVolumeUsd: z.number().min(20).max(10000).optional(),
+  minLiquidityUsd: z.number().min(25_000).max(5_000_000).optional(),
   minSignal: z.enum(['rising', 'strong']).optional(),
   watchSymbol: z
     .union([
@@ -219,6 +219,8 @@ const superMachineSettingsBody = z.object({
     ])
     .optional(),
   emergencyStop: z.boolean().optional(),
+  aggressiveMode: z.boolean().optional(),
+  trailingEntry: z.boolean().optional(),
 })
 
 const predictEventsQuery = z.object({
