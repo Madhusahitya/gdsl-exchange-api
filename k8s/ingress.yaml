@@ -1,0 +1,64 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gdsl-ingress
+  namespace: gdsl-exchange
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "86400"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "86400"
+    nginx.ingress.kubernetes.io/websocket-services: "gdsl-socket-service"
+spec:
+  tls:
+    - hosts:
+        - staging.eizy.trade
+        - staging-api.eizy.trade
+        - staging-socket.eizy.trade
+      secretName: eizy-staging-tls-secret
+  rules:
+    # 1. Web App Frontend Domain
+    - host: staging.eizy.trade
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gdsl-web-service
+                port:
+                  number: 3000
+
+    # 2. REST API Domain
+    - host: staging-api.eizy.trade
+      http:
+        paths:
+          # Backward-compatible websocket path on API domain
+          - path: /socket.io
+            pathType: Prefix
+            backend:
+              service:
+                name: gdsl-socket-service
+                port:
+                  number: 8001
+          # All REST API endpoints
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gdsl-api-service
+                port:
+                  number: 8000
+
+    # 2. Dedicated WebSocket Domain
+    - host: staging-socket.eizy.trade
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gdsl-socket-service
+                port:
+                  number: 8001

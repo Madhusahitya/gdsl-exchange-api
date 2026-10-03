@@ -24,6 +24,10 @@ Alternatively, session cookies (\`cf_token\`) are supported for web clients.
   },
   servers: [
     {
+      url: 'https://staging-api.eizy.trade',
+      description: 'Staging API Gateway (eizy.trade)',
+    },
+    {
       url: 'http://localhost:8000',
       description: 'Local Development Server',
     },

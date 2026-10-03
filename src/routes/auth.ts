@@ -55,10 +55,12 @@ function cookieDomainVariants(): Array<string | undefined> {
 
 function appendClearedAuthCookies(res: Response) {
   const secure = env.NODE_ENV === 'production'
+  const sameSite = env.COOKIE_DOMAIN ? 'Lax' : 'None'
+  const isSecure = secure || sameSite === 'None'
   for (const domain of cookieDomainVariants()) {
     const domainFlag = domain ? `Domain=${domain}; ` : ''
-    const baseFlags = `Path=/; HttpOnly; SameSite=Lax; ${secure ? 'Secure; ' : ''}${domainFlag}`
-    const csrfFlags = `Path=/; SameSite=Lax; ${secure ? 'Secure; ' : ''}${domainFlag}`
+    const baseFlags = `Path=/; HttpOnly; SameSite=${sameSite}; ${isSecure ? 'Secure; ' : ''}${domainFlag}`
+    const csrfFlags = `Path=/; SameSite=${sameSite}; ${isSecure ? 'Secure; ' : ''}${domainFlag}`
     res.append('Set-Cookie', `cf_token=; Max-Age=0; ${baseFlags}`)
     res.append('Set-Cookie', `cf_refresh_token=; Max-Age=0; ${baseFlags}`)
     res.append('Set-Cookie', `cf_csrf=; Max-Age=0; ${csrfFlags}`)
@@ -74,8 +76,10 @@ function setAuthCookies(res: Response, token: string, refreshToken: string) {
   // Wipe every historical Domain= variant first so the browser keeps only the new cookies.
   appendClearedAuthCookies(res)
   const domainFlag = env.COOKIE_DOMAIN ? `Domain=${env.COOKIE_DOMAIN}; ` : ''
-  const baseFlags = `Path=/; HttpOnly; SameSite=Lax; ${secure ? 'Secure; ' : ''}${domainFlag}`
-  const csrfFlags = `Path=/; SameSite=Lax; ${secure ? 'Secure; ' : ''}${domainFlag}`
+  const sameSite = env.COOKIE_DOMAIN ? 'Lax' : 'None'
+  const isSecure = secure || sameSite === 'None'
+  const baseFlags = `Path=/; HttpOnly; SameSite=${sameSite}; ${isSecure ? 'Secure; ' : ''}${domainFlag}`
+  const csrfFlags = `Path=/; SameSite=${sameSite}; ${isSecure ? 'Secure; ' : ''}${domainFlag}`
   const csrf = randomBytes(24).toString('hex')
   res.append('Set-Cookie', `cf_token=${token}; Max-Age=${ACCESS_TTL_SECONDS}; ${baseFlags}`)
   res.append('Set-Cookie', `cf_refresh_token=${refreshToken}; Max-Age=${REFRESH_TTL_SECONDS}; ${baseFlags}`)
@@ -381,7 +385,7 @@ router.post('/verify-email', validate(verifyEmailSchema), asyncHandler(async (re
   const refreshToken = signRefresh(user.id, user.email)
   await createRefreshSession(user.id, refreshToken, req)
   setAuthCookies(res, token, refreshToken)
-  res.json({ ok: true, verified: true })
+  res.json({ ok: true, verified: true, token, refreshToken, user: { id: user.id, email: user.email } })
 }))
 
 router.post('/resend-otp', validate(resendOtpSchema), asyncHandler(async (req: Request, res: Response) => {
@@ -499,8 +503,7 @@ router.post('/login', validate(loginSchema), asyncHandler(async (req: Request, r
   const refreshToken = signRefresh(user.id, user.email)
   await createRefreshSession(user.id, refreshToken, req)
   setAuthCookies(res, token, refreshToken)
-  // Tokens are set via HttpOnly cookies; do not echo them in the body to reduce XSS surface
-  res.json({ ok: true })
+  res.json({ ok: true, token, refreshToken, user: { id: user.id, email: user.email } })
 }))
 
 router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
@@ -585,7 +588,7 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
   await createRefreshSession(matched.user.id, nextRefreshToken, req)
   rememberRefreshGrace(matched.refreshToken, matched.user.id, matched.user.email)
   setAuthCookies(res, token, nextRefreshToken)
-  res.json({ ok: true })
+  res.json({ ok: true, token, refreshToken: nextRefreshToken })
 }))
 
 router.post('/logout', asyncHandler(async (req: Request, res: Response) => {

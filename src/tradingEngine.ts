@@ -32,10 +32,13 @@ import { startSuperMachineWatcher, loadSuperMachineFromDb } from './services/age
 import { startCexSuperMachineWatcher, loadCexSuperMachineFromDb } from './services/agents/cexSuperMachineService'
 import { warmJupiterTradableRegistry } from './services/dex/jupiterTradableRegistry'
 import { getRedisClient } from './lib/redis'
+import { setupProcessShutdown } from './lib/shutdown'
 
 process.on('unhandledRejection', (reason) => {
   logger.error({ err: reason }, 'unhandledRejection in Trading Engine')
 })
+
+setupProcessShutdown('Trading Engine')
 
 async function startTradingEngine(): Promise<void> {
   logger.info('[Trading Engine] Starting automated trading engine & position watchers...')

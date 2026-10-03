@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gdsl-api
+  namespace: gdsl-exchange
+  labels:
+    app: gdsl-api
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: gdsl-api
+  template:
+    metadata:
+      labels:
+        app: gdsl-api
+    spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: api
+          image: ghcr.io/faiyyajansari1466/gdsl-exchange-api:latest
+          imagePullPolicy: Always
+          command: ["node", "dist/server.js"]
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: gdsl-api-config
+            - secretRef:
+                name: gdsl-api-secrets
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gdsl-api-service
+  namespace: gdsl-exchange
+spec:
+  type: ClusterIP
+  selector:
+    app: gdsl-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

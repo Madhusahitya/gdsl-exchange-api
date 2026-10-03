@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gdsl-web
+  namespace: gdsl-exchange
+  labels:
+    app: gdsl-web
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gdsl-web
+  template:
+    metadata:
+      labels:
+        app: gdsl-web
+    spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: web
+          image: ghcr.io/faiyyajansari1466/gdsl-exchange-web:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              hostPort: 3001
+              name: http
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: NEXT_PUBLIC_API_URL
+              value: "https://staging-api.eizy.trade"
+            - name: NEXT_PUBLIC_WS_URL
+              value: "wss://staging-socket.eizy.trade"
+            - name: NEXT_PUBLIC_APP_URL
+              value: "https://staging.eizy.trade"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 25
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gdsl-web-service
+  namespace: gdsl-exchange
+spec:
+  type: ClusterIP
+  selector:
+    app: gdsl-web
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000

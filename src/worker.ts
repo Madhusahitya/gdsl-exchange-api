@@ -31,10 +31,13 @@ import { checkAndPromote } from './services/ml/modelPromotion'
 import { telegramPoller } from './services/notifications/telegramPoller'
 import { retryAllPendingCrossChainCredits } from './services/wallet/crossChainCreditRetryService'
 import { getRedisClient } from './lib/redis'
+import { setupProcessShutdown } from './lib/shutdown'
 
 process.on('unhandledRejection', (reason) => {
   logger.error({ err: reason }, 'unhandledRejection in Background Worker')
 })
+
+setupProcessShutdown('Background Worker')
 
 async function startWorker(): Promise<void> {
   logger.info('[Background Worker] Starting background intervals and market data services...')

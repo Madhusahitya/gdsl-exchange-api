@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gdsl-redis-pvc
+  namespace: gdsl-exchange
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gdsl-redis
+  namespace: gdsl-exchange
+  labels:
+    app: gdsl-redis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gdsl-redis
+  template:
+    metadata:
+      labels:
+        app: gdsl-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["redis-server", "--appendonly", "yes"]
+          ports:
+            - containerPort: 6379
+              name: redis
+          volumeMounts:
+            - name: redis-storage
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        - name: redis-storage
+          persistentVolumeClaim:
+            claimName: gdsl-redis-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gdsl-redis
+  namespace: gdsl-exchange
+spec:
+  type: ClusterIP
+  selector:
+    app: gdsl-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379

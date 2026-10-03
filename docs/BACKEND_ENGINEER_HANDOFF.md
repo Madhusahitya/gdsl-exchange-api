@@ -222,7 +222,9 @@ getSocketIo()?.to(`user:${userId}`).emit('trade:executed', tradeData)
 - **Live API:** [https://api.godslandx.com](https://api.godslandx.com)
 - **Live WebSocket:** `wss://api.godslandx.com`
 
-### SSH Login & Deployment Workflow
+### Zero-Downtime Deployment Workflow
+
+To deploy updates without dropping a single HTTP request or WebSocket connection:
 
 ```bash
 # 1. SSH into the server
@@ -231,16 +233,17 @@ ssh root@157.245.100.175
 # 2. Navigate to application folder
 cd /opt/trade_bot
 
-# 3. Pull latest code
-git pull origin main
-
-# 4. Rebuild and restart containers
-docker compose up -d --build
-
-# 5. Check container health
-docker compose ps
-curl -s http://127.0.0.1:8000/health
+# 3. Run the automated zero-downtime blue/green deployment script
+chmod +x scripts/deploy-zero-downtime.sh
+./scripts/deploy-zero-downtime.sh
 ```
+
+**How It Works:**
+1. Starts the idle container (e.g. Green on 8002/8003) alongside the running Blue container.
+2. Polls `http://127.0.0.1:8002/health` until it returns HTTP 200 OK.
+3. Atomically switches Nginx upstream to Green and reloads Nginx (`nginx -s reload`) with 0 dropped packets.
+4. Waits 15 seconds for in-flight requests on Blue to drain cleanly before stopping Blue.
+5. If the health check fails, the deployment automatically aborts without touching the live system.
 
 ### Database Backups
 To take an ad-hoc PostgreSQL backup:
@@ -250,29 +253,47 @@ pg_dump 'postgresql://postgres:PASSWORD@127.0.0.1:5433/cryptoflow' --no-owner --
 
 ---
 
-## 7. Recommended Nginx Reverse Proxy Configuration
+## 7. Recommended Nginx Reverse Proxy Configuration (Zero-Downtime)
 
-On the production droplet (`157.245.100.175`), Nginx routes HTTP REST traffic to Port 8000 and WebSocket connections to Port 8001:
+On the production droplet (`157.245.100.175`), configure Nginx with upstream clusters and auto-retry fallbacks:
 
 ```nginx
-# /etc/nginx/sites-available/api.godslandx.com
+# /etc/nginx/conf.d/gdsl_upstream.conf (managed by deploy-zero-downtime.sh)
+upstream api_cluster {
+    server 127.0.0.1:8000 max_fails=2 fail_timeout=5s;
+    server 127.0.0.1:8002 backup;
+    keepalive 32;
+}
 
+upstream socket_cluster {
+    ip_hash;
+    server 127.0.0.1:8001 max_fails=2 fail_timeout=5s;
+    server 127.0.0.1:8003 backup;
+}
+```
+
+```nginx
+# /etc/nginx/sites-available/staging-api.eizy.trade
 server {
-    server_name api.godslandx.com;
+    server_name staging-api.eizy.trade;
 
-    # 1. REST API traffic -> Service 1 (Port 8000)
+    # 1. REST API traffic -> Zero-Downtime Upstream Cluster
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://api_cluster;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Zero-downtime instant retry if a backend node is restarting
+        proxy_next_upstream error timeout http_502 http_503;
+        proxy_next_upstream_tries 3;
     }
 
-    # 2. Real-time WebSockets -> Service 2 (Port 8001)
+    # 2. Backward-compatible WebSockets on API domain
     location /socket.io/ {
-        proxy_pass http://127.0.0.1:8001;
+        proxy_pass http://socket_cluster;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -282,6 +303,28 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
+    }
+
+    listen 443 ssl;
+    # Managed by Certbot (Let's Encrypt)
+}
+
+# /etc/nginx/sites-available/staging-socket.eizy.trade (Dedicated WebSocket Subdomain)
+server {
+    server_name staging-socket.eizy.trade;
+
+    location / {
+        proxy_pass http://socket_cluster;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+        proxy_buffering off;
     }
 
     listen 443 ssl;
@@ -334,10 +377,18 @@ gdsl-exchange-api/
 │   ├── binance-executor/           # Binance live execution
 │   └── dex-pancake/                # PancakeSwap SDK & execution
 │
+├── k8s/                            # Production Kubernetes Manifests
+│   ├── api-deployment.yaml         # Stateless REST API (HPA 2-10 pods)
+│   ├── socket-deployment.yaml      # Realtime WebSockets (HPA 2-8 pods)
+│   ├── trading-engine-deployment.yaml # Singleton Bot Engine (1 replica)
+│   ├── worker-deployment.yaml      # Singleton Background Worker (1 replica)
+│   ├── ingress.yaml                # Ingress-Nginx routing & SSL TLS
+│   └── hpa.yaml                    # Horizontal Pod Autoscaling policies
 ├── docker/
 │   └── api.Dockerfile              # Multi-stage production container build
 ├── docker-compose.yml              # 4-Service orchestration + Redis + Postgres
 └── scripts/
+    ├── deploy-zero-downtime.sh     # Single-droplet Blue/Green deployment
     └── benchmark-test.ts           # High-load performance testing script
 ```
 

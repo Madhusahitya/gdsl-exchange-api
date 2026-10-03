@@ -1,0 +1,343 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gdsl-exchange
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gdsl-api-config
+  namespace: gdsl-exchange
+data:
+  NODE_ENV: "production"
+  PORT: "8000"
+  SOCKET_PORT: "8001"
+  FRONTEND_URL: "https://staging.eizy.trade"
+  COOKIE_DOMAIN: ".eizy.trade"
+  ALLOWED_CORS_ORIGINS: "https://staging.eizy.trade,https://staging-api.eizy.trade,https://staging-socket.eizy.trade,http://localhost:8003,http://localhost:3000,http://127.0.0.1:8003,http://127.0.0.1:3000"
+  DEFAULT_CHAIN: "BSC"
+  DEMO_MODE: "false"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gdsl-api
+  namespace: gdsl-exchange
+  labels:
+    app: gdsl-api
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: gdsl-api
+  template:
+    metadata:
+      labels:
+        app: gdsl-api
+    spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: api
+          image: ghcr.io/faiyyajansari1466/gdsl-exchange-api:latest
+          imagePullPolicy: Always
+          command: ["node", "dist/server.js"]
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: gdsl-api-config
+            - secretRef:
+                name: gdsl-api-secrets
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gdsl-api-service
+  namespace: gdsl-exchange
+spec:
+  type: ClusterIP
+  selector:
+    app: gdsl-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gdsl-socket
+  namespace: gdsl-exchange
+  labels:
+    app: gdsl-socket
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: gdsl-socket
+  template:
+    metadata:
+      labels:
+        app: gdsl-socket
+    spec:
+      terminationGracePeriodSeconds: 60
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: socket
+          image: ghcr.io/faiyyajansari1466/gdsl-exchange-api:latest
+          imagePullPolicy: Always
+          command: ["node", "dist/socket.js"]
+          ports:
+            - containerPort: 8001
+              name: websocket
+          envFrom:
+            - configMapRef:
+                name: gdsl-api-config
+            - secretRef:
+                name: gdsl-api-secrets
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gdsl-socket-service
+  namespace: gdsl-exchange
+spec:
+  type: ClusterIP
+  selector:
+    app: gdsl-socket
+  ports:
+    - name: websocket
+      port: 8001
+      targetPort: 8001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gdsl-trading-engine
+  namespace: gdsl-exchange
+  labels:
+    app: gdsl-trading-engine
+spec:
+  # CRITICAL: Must remain 1 replica to prevent duplicate trade executions
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gdsl-trading-engine
+  template:
+    metadata:
+      labels:
+        app: gdsl-trading-engine
+    spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: trading-engine
+          image: ghcr.io/faiyyajansari1466/gdsl-exchange-api:latest
+          imagePullPolicy: Always
+          command: ["node", "dist/tradingEngine.js"]
+          envFrom:
+            - configMapRef:
+                name: gdsl-api-config
+            - secretRef:
+                name: gdsl-api-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1024Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2048Mi"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gdsl-worker
+  namespace: gdsl-exchange
+  labels:
+    app: gdsl-worker
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gdsl-worker
+  template:
+    metadata:
+      labels:
+        app: gdsl-worker
+    spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: worker
+          image: ghcr.io/faiyyajansari1466/gdsl-exchange-api:latest
+          imagePullPolicy: Always
+          command: ["node", "dist/worker.js"]
+          envFrom:
+            - configMapRef:
+                name: gdsl-api-config
+            - secretRef:
+                name: gdsl-api-secrets
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gdsl-ingress
+  namespace: gdsl-exchange
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "86400"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "86400"
+    nginx.ingress.kubernetes.io/websocket-services: "gdsl-socket-service"
+spec:
+  tls:
+    - hosts:
+        - staging-api.eizy.trade
+        - staging-socket.eizy.trade
+      secretName: eizy-staging-tls-secret
+  rules:
+    # 1. REST API Domain
+    - host: staging-api.eizy.trade
+      http:
+        paths:
+          - path: /socket.io
+            pathType: Prefix
+            backend:
+              service:
+                name: gdsl-socket-service
+                port:
+                  number: 8001
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gdsl-api-service
+                port:
+                  number: 8000
+    # 2. WebSocket Domain
+    - host: staging-socket.eizy.trade
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gdsl-socket-service
+                port:
+                  number: 8001
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gdsl-api-hpa
+  namespace: gdsl-exchange
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gdsl-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gdsl-socket-hpa
+  namespace: gdsl-exchange
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gdsl-socket
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
